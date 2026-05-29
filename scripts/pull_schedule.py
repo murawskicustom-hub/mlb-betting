@@ -1,6 +1,7 @@
 import sys
+import argparse
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pytz
 
 from database import init_db, get_connection
@@ -20,8 +21,18 @@ def fetch_schedule(date_str):
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as e:
-        log.error(f'API request failed: {e}')
+        log.error(f'API request failed for {date_str}: {e}')
         return None
+
+
+def utc_str_to_eastern_date(utc_str):
+    """
+    Convert an MLB API UTC datetime string ('YYYY-MM-DDTHH:MM:SSZ')
+    to a date string in US/Eastern ('YYYY-MM-DD').
+    """
+    dt_utc = datetime.strptime(utc_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    dt_eastern = dt_utc.astimezone(EASTERN)
+    return dt_eastern.strftime('%Y-%m-%d')
 
 
 def parse_game(game):
@@ -36,8 +47,9 @@ def parse_game(game):
         return None
 
     try:
-        game_date = game['gameDate'][:10]  # "YYYY-MM-DDTHH:MM:SSZ" -> "YYYY-MM-DD"
         game_datetime_utc = game['gameDate']
+        # Convert UTC first pitch to Eastern date — this is the canonical gameday date
+        game_date = utc_str_to_eastern_date(game_datetime_utc)
 
         teams = game['teams']
         home = teams['home']['team']
@@ -116,46 +128,109 @@ def upsert_game(conn, game_data, now_utc):
         return 'inserted'
 
 
-def main():
-    init_db()
-
-    today = datetime.now(EASTERN).strftime('%Y-%m-%d')
-    log.info(f'Pulling MLB schedule for {today}')
-
-    data = fetch_schedule(today)
+def pull_date(date_str, conn, now_utc):
+    """Pull schedule for a single date string and upsert into the open connection."""
+    log.info(f'Pulling MLB schedule for {date_str}')
+    data = fetch_schedule(date_str)
     if data is None:
-        log.error('Aborting — no data returned from API')
-        sys.exit(1)
+        log.error(f'Aborting {date_str} — no data returned from API')
+        return None, None, None
 
     dates = data.get('dates', [])
     if not dates:
-        log.info(f'No games scheduled for {today}')
-        print(f'Pulled schedule for {today}: 0 games.')
-        return
+        log.info(f'No games scheduled for {date_str}')
+        return 0, 0, 0
 
     raw_games = dates[0].get('games', [])
-    log.info(f'API returned {len(raw_games)} game(s)')
+    log.info(f'{date_str}: API returned {len(raw_games)} game(s)')
+
+    inserted = updated = skipped = 0
+    for game in raw_games:
+        game_data = parse_game(game)
+        if game_data is None:
+            skipped += 1
+            continue
+        result = upsert_game(conn, game_data, now_utc)
+        if result == 'inserted':
+            inserted += 1
+        else:
+            updated += 1
+
+    log.info(f'{date_str}: {inserted} inserted, {updated} updated, {skipped} skipped')
+    return inserted, updated, skipped
+
+
+def date_range(start_str, end_str):
+    """Yield each date string from start to end inclusive."""
+    start = datetime.strptime(start_str, '%Y-%m-%d').date()
+    end = datetime.strptime(end_str, '%Y-%m-%d').date()
+    if start > end:
+        raise ValueError(f'Start date {start_str} is after end date {end_str}')
+    current = start
+    while current <= end:
+        yield current.strftime('%Y-%m-%d')
+        current += timedelta(days=1)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Pull MLB schedule into the local database.',
+        epilog=(
+            'Examples:\n'
+            '  python pull_schedule.py                        # today\n'
+            '  python pull_schedule.py 2026-05-30             # single date\n'
+            '  python pull_schedule.py 2026-05-29 2026-06-05  # date range\n'
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        'dates', nargs='*', metavar='YYYY-MM-DD',
+        help='Optional date or date range (1 or 2 arguments).'
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    init_db()
+
+    if len(args.dates) == 0:
+        dates = [datetime.now(EASTERN).strftime('%Y-%m-%d')]
+    elif len(args.dates) == 1:
+        dates = [args.dates[0]]
+    elif len(args.dates) == 2:
+        try:
+            dates = list(date_range(args.dates[0], args.dates[1]))
+        except ValueError as e:
+            log.error(str(e))
+            sys.exit(1)
+    else:
+        log.error('Too many arguments — provide 0, 1, or 2 dates.')
+        sys.exit(1)
 
     now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    inserted = updated = skipped = 0
+    total_inserted = total_updated = total_skipped = 0
 
     with get_connection() as conn:
-        for game in raw_games:
-            game_data = parse_game(game)
-            if game_data is None:
-                skipped += 1
+        for date_str in dates:
+            ins, upd, skp = pull_date(date_str, conn, now_utc)
+            if ins is None:
                 continue
-            result = upsert_game(conn, game_data, now_utc)
-            if result == 'inserted':
-                inserted += 1
-            else:
-                updated += 1
+            total_inserted += ins
+            total_updated += upd
+            total_skipped += skp
 
-    log.info(f'Done: {inserted} inserted, {updated} updated, {skipped} skipped')
-    print(
-        f'Pulled schedule for {today}: {inserted + updated} games '
-        f'({inserted} new, {updated} updated).'
-    )
+    if len(dates) == 1:
+        print(
+            f'Pulled schedule for {dates[0]}: {total_inserted + total_updated} games '
+            f'({total_inserted} new, {total_updated} updated).'
+        )
+    else:
+        print(
+            f'Pulled schedule for {dates[0]} to {dates[-1]}: '
+            f'{total_inserted + total_updated} games across {len(dates)} dates '
+            f'({total_inserted} new, {total_updated} updated).'
+        )
 
 
 if __name__ == '__main__':
