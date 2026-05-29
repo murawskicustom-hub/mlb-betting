@@ -29,3 +29,15 @@ def init_db():
                 last_updated_utc    TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS probable_pitchers (
+                game_pk          INTEGER,
+                team_side        TEXT,
+                pitcher_id       INTEGER,
+                pitcher_name     TEXT,
+                pitcher_throws   TEXT,
+                is_confirmed     INTEGER DEFAULT 0,
+                last_updated_utc TEXT,
+                UNIQUE (game_pk, team_side)
+            )
+        """)

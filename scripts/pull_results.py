@@ -13,7 +13,8 @@ SCHEDULE_URL = 'https://statsapi.mlb.com/api/v1/schedule'
 
 KNOWN_STATUSES = {
     'Scheduled', 'Pre-Game', 'Warmup', 'In Progress',
-    'Final', 'Postponed', 'Cancelled', 'Suspended', 'Delayed',
+    'Final', 'Completed Early',
+    'Postponed', 'Cancelled', 'Suspended', 'Delayed',
 }
 
 log = get_logger('pull_results')
