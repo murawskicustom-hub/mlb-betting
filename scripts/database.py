@@ -41,3 +41,33 @@ def init_db():
                 UNIQUE (game_pk, team_side)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS odds_snapshots (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_pk             INTEGER,
+                book                TEXT,
+                market              TEXT,
+                outcome_type        TEXT,
+                line                REAL,
+                price_american      INTEGER,
+                price_decimal       REAL,
+                snapshot_time_utc   TEXT,
+                api_last_update_utc TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_odds_snapshots_game_market_time
+            ON odds_snapshots (game_pk, market, snapshot_time_utc)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS odds_pulls (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                pull_time_utc      TEXT,
+                endpoint           TEXT,
+                games_returned     INTEGER,
+                requests_remaining INTEGER,
+                requests_used      INTEGER,
+                success            INTEGER,
+                error_message      TEXT
+            )
+        """)
