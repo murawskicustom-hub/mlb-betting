@@ -17,6 +17,12 @@ from pathlib import Path
 
 import pytz
 
+# Add scripts dir to path so we can import grader and clv_calculator directly
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from database import get_connection
+from grader import grade_pending
+from clv_calculator import compute_clv
+
 EASTERN     = pytz.timezone('US/Eastern')
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR  = PROJECT_ROOT / 'scripts'
@@ -143,7 +149,33 @@ def main():
         success = run_script(script, args, log)
         results[script] = success
 
-    # Summary
+    # ── Grader + CLV pass (runs after every slot) ─────────────────────────────
+    log.info('Running grader and CLV calculator...')
+    try:
+        with get_connection() as conn:
+            grade_summary = grade_pending(conn)
+            clv_summary   = compute_clv(conn)
+        log.info(
+            f'  Grader: {grade_summary["rec_graded"]} recs graded '
+            f'(W={grade_summary["rec_counts"]["win"]} '
+            f'L={grade_summary["rec_counts"]["loss"]} '
+            f'P={grade_summary["rec_counts"].get("push",0)} '
+            f'V={grade_summary["rec_counts"].get("void",0)}), '
+            f'{grade_summary["bets_graded"]} bets graded, '
+            f'{grade_summary["f5_skipped"]} F5 skipped'
+        )
+        log.info(
+            f'  CLV: recs filled={clv_summary["rec_filled"]} '
+            f'skipped={clv_summary["rec_skipped"]}, '
+            f'bets filled={clv_summary["bet_filled"]} '
+            f'skipped={clv_summary["bet_skipped"]}'
+        )
+        results['grader+clv'] = True
+    except Exception as e:
+        log.error(f'  Grader/CLV raised an exception: {e}')
+        results['grader+clv'] = False
+
+    # ── Summary ───────────────────────────────────────────────────────────────
     log.info('-' * 60)
     all_ok = all(results.values())
     for script, ok in results.items():
