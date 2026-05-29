@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from database import get_connection
 from grader import grade_pending
 from clv_calculator import compute_clv
+from analyzer import generate_all_recommendations
 
 EASTERN     = pytz.timezone('US/Eastern')
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -174,6 +175,23 @@ def main():
     except Exception as e:
         log.error(f'  Grader/CLV raised an exception: {e}')
         results['grader+clv'] = False
+
+    # ── Analyzer (runs after every slot) ──────────────────────────────────────
+    log.info('Running analyzer...')
+    try:
+        with get_connection() as conn:
+            ana = generate_all_recommendations(conn)
+        by_cm = ana['by_color_market']
+        log.info(
+            f'  Analyzer: {ana["games_analyzed"]} games, '
+            f'{ana["total_written"]} new recs — '
+            + ', '.join(f'{k}={v}' for k, v in sorted(by_cm.items()))
+            + f'; {len(ana["games_no_rec"])} games no rec'
+        )
+        results['analyzer'] = True
+    except Exception as e:
+        log.error(f'  Analyzer raised an exception: {e}')
+        results['analyzer'] = False
 
     # ── Summary ───────────────────────────────────────────────────────────────
     log.info('-' * 60)
