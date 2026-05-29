@@ -1,0 +1,22 @@
+# Virtual environment
+venv/
+
+# Data and logs (keep folders, ignore contents)
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Environment files
+.env
+*.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS files
+.DS_Store
+Thumbs.db
