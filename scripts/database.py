@@ -127,3 +127,15 @@ def init_db():
                 error_message      TEXT
             )
         """)
+        # ── settings ──────────────────────────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key            TEXT PRIMARY KEY,
+                value          TEXT,
+                updated_at_utc TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO settings (key, value, updated_at_utc)
+            VALUES ('bankroll_dollars', '2500', datetime('now'))
+        """)
