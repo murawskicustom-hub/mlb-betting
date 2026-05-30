@@ -26,12 +26,18 @@ def classify_color(edge_pct: float) -> tuple[str, int]:
     """
     Returns (confidence_color, is_shadow).
     'none' means don't write a recommendation at all.
+
+    Thresholds:
+        >= 4.0%  → green  (real bet)
+        >= 2.0%  → yellow (real bet, smaller stake)
+        >= 0.5%  → red    (shadow only — some signal, too thin to bet)
+        <  0.5%  → none   (noise, skip entirely)
     """
     if edge_pct >= 4.0:
         return ('green', 0)
     elif edge_pct >= 2.0:
         return ('yellow', 0)
-    elif edge_pct >= 0.0:
+    elif edge_pct >= 0.5:
         return ('red', 1)
     else:
         return ('none', 1)
@@ -127,14 +133,14 @@ def generate_recommendations_for_game(conn, game_pk: int) -> list[int]:
                     target_price_american, fair_price_american,
                     edge_percent, confidence_color,
                     recommended_stake_pct, recommended_stake_dollars_at_2500,
-                    is_shadow
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_shadow, num_books_in_consensus
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 game_pk, now_utc, market, side, best.get('line'),
                 best['offered_price_american'], best['fair_price_american'],
                 round(best_ep, 4), color,
                 stake_pct, stake_dollars,
-                is_shadow,
+                is_shadow, best['num_books_in_consensus'],
             ))
 
             rec_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
