@@ -75,6 +75,7 @@ def init_db():
                 recommended_stake_pct           REAL,
                 recommended_stake_dollars_at_2500 REAL,
                 is_shadow                       INTEGER DEFAULT 0,
+                num_books_in_consensus          INTEGER NOT NULL DEFAULT 0,
                 closing_price_american          INTEGER,
                 clv_percent                     REAL,
                 result                          TEXT,
