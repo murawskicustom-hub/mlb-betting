@@ -8,70 +8,80 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import streamlit as st
+import pandas as pd
 
 from database import get_connection, init_db
 from settings import get_bankroll, set_bankroll, get_setting
 from components.metrics import data_status
-from components.formatters import utc_to_eastern, fmt_datetime_et
+from components.formatters import fmt_datetime_et
+from components.styles import inject_custom_css, section_head
 
 st.set_page_config(page_title='Settings — MLB Betting', page_icon='⚙️', layout='wide')
+inject_custom_css()
 init_db()
-st.title('⚙️ Settings')
+
+st.markdown('<div style="font-size:22px;font-weight:700;margin-bottom:20px;">Settings</div>',
+            unsafe_allow_html=True)
 
 # ── Bankroll ──────────────────────────────────────────────────────────────────
-st.subheader('Bankroll')
+section_head('BANKROLL')
 
 with get_connection() as conn:
     current_bankroll = get_bankroll(conn)
-    bankroll_updated = get_setting(conn, 'bankroll_dollars')  # get raw to check timestamp
     updated_row = conn.execute(
         "SELECT updated_at_utc FROM settings WHERE key='bankroll_dollars'"
     ).fetchone()
     updated_at = updated_row[0] if updated_row else None
 
 col_val, col_form = st.columns([1, 2])
-col_val.metric('Current Bankroll', f'${current_bankroll:,.2f}')
+col_val.markdown(
+    f'<div class="m-tile positive" style="display:inline-block;min-width:160px;">'
+    f'<div class="m-label">CURRENT BANKROLL</div>'
+    f'<div class="m-value accent">${current_bankroll:,.2f}</div>'
+    f'</div>',
+    unsafe_allow_html=True
+)
 if updated_at:
-    dt = utc_to_eastern(updated_at)
-    col_val.caption(f'Last updated: {fmt_datetime_et(updated_at)}')
+    col_val.markdown(
+        f'<span style="font-size:11px;font-family:\'JetBrains Mono\',monospace;color:#8B92A8;">'
+        f'UPDATED: {fmt_datetime_et(updated_at)}</span>',
+        unsafe_allow_html=True
+    )
 
 with col_form:
     with st.form('bankroll_form'):
         new_bankroll = st.number_input(
-            'New bankroll ($)',
-            min_value=100.0,
-            max_value=1_000_000.0,
-            value=float(current_bankroll),
-            step=100.0,
-            format='%.2f',
+            'NEW BANKROLL ($)', min_value=100.0, max_value=1_000_000.0,
+            value=float(current_bankroll), step=100.0, format='%.2f'
         )
-        if st.form_submit_button('💾 Save Bankroll'):
+        if st.form_submit_button('SAVE'):
             with get_connection() as conn:
                 set_bankroll(conn, new_bankroll)
-            st.success(f'Bankroll updated to ${new_bankroll:,.2f}')
+            st.success(f'BANKROLL UPDATED → ${new_bankroll:,.2f}')
             st.rerun()
 
-st.divider()
-
 # ── Data status ───────────────────────────────────────────────────────────────
-st.subheader('Data Status')
+section_head('DATA STATUS')
 
 with get_connection() as conn:
     status = data_status(conn)
 
 col_a, col_b, col_c = st.columns(3)
-col_a.metric('Total Games',        status['total_games'])
-col_a.metric('Total Odds Snapshots', f"{status['total_snapshots']:,}")
-col_b.metric('Recommendations',    status['total_recs'],
+col_a.metric('TOTAL GAMES',     status['total_games'])
+col_a.metric('ODDS SNAPSHOTS',  f"{status['total_snapshots']:,}")
+col_b.metric('RECOMMENDATIONS', status['total_recs'],
              delta=f"{status['graded_recs']} graded / {status['pending_recs']} pending")
-col_c.metric('Personal Bets',      status['total_bets'],
+col_c.metric('PERSONAL BETS',   status['total_bets'],
              delta=f"{status['graded_bets']} graded / {status['pending_bets']} pending")
 
-st.subheader('Last Scheduled Run Per Slot')
-slot_data = []
-for slot, last_date in status['last_slot_runs'].items():
-    slot_data.append({'Slot': slot.capitalize(), 'Last Run Date': last_date or '— never —'})
-
-import pandas as pd
+section_head('LAST SCHEDULED RUN PER SLOT')
+slot_data = [
+    {'SLOT': s.upper(), 'LAST RUN DATE': d or '— NEVER —'}
+    for s, d in status['last_slot_runs'].items()
+]
 st.dataframe(pd.DataFrame(slot_data), width='stretch', hide_index=True)
-st.caption('Based on log files in logs/scheduled/. A missing date means that slot has never run successfully.')
+st.markdown(
+    '<span style="font-size:11px;font-family:\'JetBrains Mono\',monospace;color:#8B92A8;">'
+    'Based on log files in logs/scheduled/</span>',
+    unsafe_allow_html=True
+)
