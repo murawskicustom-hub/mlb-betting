@@ -22,7 +22,8 @@ from components.styles import (
 
 EASTERN = pytz.timezone('US/Eastern')
 
-st.set_page_config(page_title='Today — MLB Betting', page_icon='📋', layout='wide')
+st.set_page_config(page_title='Today — MLB Betting', page_icon='📋', layout='wide',
+                   initial_sidebar_state='expanded')
 inject_custom_css()
 init_db()
 

@@ -16,7 +16,8 @@ from components.metrics import data_status
 from components.formatters import fmt_datetime_et
 from components.styles import inject_custom_css, section_head
 
-st.set_page_config(page_title='Settings — MLB Betting', page_icon='⚙️', layout='wide')
+st.set_page_config(page_title='Settings — MLB Betting', page_icon='⚙️', layout='wide',
+                   initial_sidebar_state='expanded')
 inject_custom_css()
 init_db()
 

@@ -21,7 +21,8 @@ from components.styles import (
     C_ACCENT, C_YELLOW, C_RED_MUTED,
 )
 
-st.set_page_config(page_title='Performance — MLB Betting', page_icon='📊', layout='wide')
+st.set_page_config(page_title='Performance — MLB Betting', page_icon='📊', layout='wide',
+                   initial_sidebar_state='expanded')
 inject_custom_css()
 init_db()
 

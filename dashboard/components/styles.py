@@ -38,10 +38,32 @@ def inject_custom_css():
 /* ── Font imports ─────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600&display=swap');
 
-/* ── Hide Streamlit chrome ────────────────────────────── */
-#MainMenu, footer, [data-testid="stHeader"],
-[data-testid="stDecoration"], [data-testid="stToolbar"],
-.stDeployButton {{ visibility: hidden; height: 0; }}
+/* ── Hide Streamlit branding — NOT the header bar itself ─ */
+/* stHeader contains the sidebar toggle; hiding it removes  */
+/* the only way to reopen the nav. Hide children instead.  */
+footer {{ visibility: hidden; }}
+#MainMenu {{ visibility: hidden; }}
+.stDeployButton {{ display: none !important; }}
+[data-testid="stDecoration"] {{ display: none !important; }}
+
+/* Hide the app menu (⋮) and the top-right toolbar icons,  */
+/* but NOT the sidebar chevron button.                     */
+[data-testid="stToolbar"] {{ display: none !important; }}
+[data-testid="stHeader"] button[kind="header"] {{ display: none !important; }}
+
+/* Keep the header bar itself, but collapse its height so  */
+/* it doesn't waste vertical space. The sidebar chevron    */
+/* (data-testid="collapsedControl" / "stSidebarCollapsedControl") */
+/* is rendered in the sidebar, not the header, so it's safe. */
+[data-testid="stHeader"] {{
+    background: transparent !important;
+    border-bottom: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+}}
+/* The actual collapse toggle lives outside stHeader — leave it alone */
 
 /* ── Global typography ────────────────────────────────── */
 html, body, [class*="css"] {{
@@ -143,16 +165,52 @@ hr {{
     background: rgba(0,212,170,0.06);
 }}
 
-/* ── Sidebar nav ──────────────────────────────────────── */
+/* ── Sidebar background & wordmark ───────────────────── */
+[data-testid="stSidebar"] {{
+    background: #0E1118 !important;
+    border-right: 1px solid {C_BORDER};
+}}
+[data-testid="stSidebar"] > div:first-child {{
+    padding-top: 20px !important;
+}}
+
+/* Wordmark injected via ::before on the sidebar content */
+[data-testid="stSidebarContent"]::before {{
+    content: 'CMJ BETS';
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: {C_ACCENT};
+    padding: 0 16px 18px 16px;
+    border-bottom: 1px solid {C_BORDER};
+    margin-bottom: 12px;
+}}
+
+/* ── Sidebar nav links ────────────────────────────────── */
+[data-testid="stSidebarNav"] {{
+    padding-top: 4px;
+}}
 [data-testid="stSidebarNav"] a {{
-    font-size: 13px;
-    letter-spacing: 0.03em;
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
     color: {C_MUTED};
-    font-weight: 400;
+    font-weight: 500;
+    padding: 8px 16px;
+    border-radius: 4px;
+    transition: color 0.12s ease, background 0.12s ease;
+}}
+[data-testid="stSidebarNav"] a:hover {{
+    color: {C_TEXT};
+    background: rgba(255,255,255,0.04);
 }}
 [data-testid="stSidebarNav"] a[aria-selected="true"] {{
     color: {C_ACCENT};
     font-weight: 600;
+    background: rgba(0,212,170,0.07);
 }}
 
 /* ── Status bar ───────────────────────────────────────── */
