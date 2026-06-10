@@ -1,13 +1,15 @@
 [theme]
-base                = "dark"
-backgroundColor     = "#0B0E14"
+base                     = "dark"
+backgroundColor          = "#0B0E14"
 secondaryBackgroundColor = "#131722"
-primaryColor        = "#00D4AA"
-textColor           = "#E6E9EF"
-font                = "sans serif"
+primaryColor             = "#00D4AA"
+textColor                = "#E6E9EF"
+font                     = "sans serif"
 
 [server]
-headless            = true
+address                  = "localhost"
+headless                 = false
+port                     = 8501
 
 [browser]
-gatherUsageStats    = false
+gatherUsageStats         = false
