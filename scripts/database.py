@@ -152,7 +152,8 @@ def init_db():
                 clv_percent                     REAL,
                 result                          TEXT,
                 result_payout_at_stake_1        REAL,
-                graded_at_utc                   TEXT
+                graded_at_utc                   TEXT,
+                classification_version          TEXT DEFAULT 'v2'
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_rec_game_pk      ON recommendations (game_pk)")
@@ -165,6 +166,13 @@ def init_db():
         _add_col(conn, 'recommendations', 'model_probability', 'REAL')
         _add_col(conn, 'recommendations', 'model_notes',       'TEXT')
         conn.execute("CREATE INDEX IF NOT EXISTS idx_rec_algo ON recommendations (algo)")
+
+        # classification_version: distinguishes pre-recalibration rows (v1, green
+        # classified on edge alone) from post-recalibration rows (v2, dual-axis
+        # green floor). New rows default to 'v2'. The one-time backfill of
+        # existing rows to 'v1' is done in scripts/migrate_classification_v1.py,
+        # NOT here, so re-running init_db never overwrites a v2 row back to v1.
+        _add_col(conn, 'recommendations', 'classification_version', "TEXT DEFAULT 'v2'")
 
         # units tracking: migration-safe
         _add_col(conn, 'recommendations', 'unit_profit', 'REAL')

@@ -118,6 +118,17 @@ def generate_recommendations_for_game(conn, game_pk: int) -> tuple[list[int], in
             if color == 'none':
                 continue
 
+            # DUAL-AXIS GREEN FLOOR (v2 recalibration, 2026-06-17).
+            # Same edge-only mislabeling as Algo 2: greens on sub-50% fair
+            # probability (longshots) lost — 4 graded greens at fair_prob < 0.50
+            # won 25% (-3.56u), vs 9 greens at 50%+ winning 77.8% (+6.56u).
+            # A green must clear an edge bar AND a confidence bar: edge >= 4%
+            # (enforced above) AND consensus fair_probability >= 0.50. High-edge
+            # longshots below the floor demote to RED shadow (kept for the
+            # control-group ledger, not bettable).
+            if color == 'green' and best.get('fair_probability', 1.0) < 0.50:
+                color, is_shadow = 'red', 1
+
             existing = _existing_ungraded_rec(conn, game_pk, market, side,
                                               best.get('line'), algo='devig')
             if existing is not None:
@@ -403,6 +414,19 @@ def generate_model_recommendations(conn) -> dict:
                 color, is_shadow = classify_model_color(model_ep)
                 if color == 'none':
                     continue
+
+                # DUAL-AXIS GREEN FLOOR (v2 recalibration, 2026-06-17).
+                # Green was classified on edge alone, which mislabeled high-edge
+                # low-confidence longshots as high-conviction. Calibration on
+                # graded greens showed: model_probability < 0.60 won only 44.4%
+                # over 75 picks (-7.60u), while 60%+ greens won 69-72% and were
+                # profitable. A "green" must clear BOTH an edge bar AND a
+                # confidence bar: edge >= 8.0% (already enforced above) AND
+                # model_probability >= 0.60. Picks with the edge but sub-0.60
+                # probability demote to RED shadow — kept in the ledger as
+                # control-group data, never bettable.
+                if color == 'green' and model_prob < 0.60:
+                    color, is_shadow = 'red', 1
 
                 # Dedup
                 existing = _existing_ungraded_rec(conn, game_pk, market, side,
