@@ -1,6 +1,10 @@
 @echo off
 cd /d "%~dp0"
 
+rem Stage 4: dashboard reads/writes Postgres (Neon) so it shows the same data the
+rem cloud job writes. SQLite is frozen as the rollback snapshot.
+set DB_BACKEND=postgres
+
 echo [1/3] Clearing pycache...
 venv\Scripts\python.exe scripts\clear_pycache.py
 

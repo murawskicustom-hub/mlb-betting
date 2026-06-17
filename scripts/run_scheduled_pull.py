@@ -15,6 +15,12 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Stage 4: the orchestrator (scheduled tasks + manual catch-ups) targets Postgres
+# so the laptop and the GitHub Actions cloud job both write to the same Neon DB.
+# setdefault keeps it overridable (e.g. DB_BACKEND=sqlite for local testing); CI
+# sets the same value explicitly. Subprocess sub-scripts inherit this via os.environ.
+os.environ.setdefault('DB_BACKEND', 'postgres')
+
 import pytz
 
 # Add scripts dir to path so we can import grader and clv_calculator directly
@@ -29,7 +35,10 @@ EASTERN     = pytz.timezone('US/Eastern')
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR  = PROJECT_ROOT / 'scripts'
 LOGS_DIR     = PROJECT_ROOT / 'logs' / 'scheduled'
-VENV_PYTHON  = PROJECT_ROOT / 'venv' / 'Scripts' / 'python.exe'
+# Use the active interpreter so sub-scripts run under the same Python: the venv
+# on the laptop (the scheduled task launches venv\Scripts\pythonw.exe), and the
+# setup-python interpreter in GitHub Actions (where the venv path doesn't exist).
+VENV_PYTHON  = sys.executable
 
 # Each slot: list of (script_filename, extra_args_list)
 # Empty extra_args means "use the script's own default"

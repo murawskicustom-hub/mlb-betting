@@ -1,0 +1,74 @@
+name: MLB data pulls
+
+# Cloud half of the Stage 4 parallel run. Runs the SAME orchestrator slots the
+# laptop runs, but with DB_BACKEND=postgres so all writes land in Neon.
+#
+# Cron is UTC. ET is UTC-4 during summer DST (EDT), so the UTC times below map to:
+#   morning  11:00 UTC = 07:00 EDT
+#   midday   16:00 UTC = 12:00 EDT
+#   pregame  21:00 UTC = 17:00 EDT
+#   closing  03:00 UTC = 23:00 EDT (previous ET day)
+# NOTE: these are fixed UTC offsets for EDT. When ET returns to EST (UTC-5) the
+# ET clock times shift one hour; revisit the cron in November if needed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Slot to run (morning | midday | pregame | closing)"
+        required: true
+        default: midday
+        type: choice
+        options: [morning, midday, pregame, closing]
+  schedule:
+    - cron: "0 11 * * *"   # morning  — 07:00 EDT
+    - cron: "0 16 * * *"   # midday   — 12:00 EDT
+    - cron: "0 21 * * *"   # pregame  — 17:00 EDT
+    - cron: "0 3 * * *"    # closing  — 23:00 EDT (prev ET day)
+
+concurrency:
+  # Never let two slots run against the same Postgres DB at once.
+  group: mlb-pulls
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DB_BACKEND: postgres
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      ALGO1_DISCORD_WEBHOOK: ${{ secrets.ALGO1_DISCORD_WEBHOOK }}
+      ALGO2_DISCORD_WEBHOOK: ${{ secrets.ALGO2_DISCORD_WEBHOOK }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Resolve slot from trigger
+        id: slot
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ github.event.inputs.slot }}" >> "$GITHUB_OUTPUT"
+          else
+            case "${{ github.event.schedule }}" in
+              "0 11 * * *") echo "name=morning" >> "$GITHUB_OUTPUT" ;;
+              "0 16 * * *") echo "name=midday"  >> "$GITHUB_OUTPUT" ;;
+              "0 21 * * *") echo "name=pregame" >> "$GITHUB_OUTPUT" ;;
+              "0 3 * * *")  echo "name=closing" >> "$GITHUB_OUTPUT" ;;
+            esac
+          fi
+
+      - name: Run orchestrator slot
+        run: python scripts/run_scheduled_pull.py ${{ steps.slot.outputs.name }}
