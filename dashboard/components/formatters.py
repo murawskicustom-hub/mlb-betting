@@ -100,4 +100,13 @@ def market_label(market: str, side: str, line) -> str:
     elif market == 'spread':
         line_str = f' {line:+g}' if line is not None else ''
         return f'Spread {side.capitalize()}{line_str}'
+    elif market == 'f5_moneyline':
+        return f'F5 ML {side.capitalize()}'
+    elif market == 'f5_total':
+        line_str = f' {line}' if line is not None else ''
+        return f'F5 Total {side.capitalize()}{line_str}'
+    elif market == 'yrfi':
+        return 'YRFI'
+    elif market == 'nrfi':
+        return 'NRFI'
     return market

@@ -22,7 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from database import get_connection
 from grader import grade_pending
 from clv_calculator import compute_clv
-from analyzer import generate_all_recommendations
+from analyzer import generate_all_recommendations, generate_model_recommendations
+from notify import send_algo2_digest
 
 EASTERN     = pytz.timezone('US/Eastern')
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -37,24 +38,30 @@ def build_slots():
     today     = now_et.strftime('%Y-%m-%d')
     yesterday = (now_et - timedelta(days=1)).strftime('%Y-%m-%d')
 
+    # SAFETY HOLD: F5 market keys disabled pending budget audit sign-off.
+    # To re-enable: set pregame and closing back to F5_MARKETS.
+    # F5_MARKETS = 'h2h,totals,spreads,h2h_1st_5_innings,totals_1st_5_innings'
+
     return {
         'morning': [
             ('pull_schedule.py', [today]),
             ('pull_results.py',  [yesterday]),
             ('pull_pitchers.py', [today]),
-            ('pull_odds.py',     []),
+            ('pull_stats.py',    []),      # pitcher + team offense stats for model
+            ('pull_odds.py',     []),      # 3 markets only
         ],
         'midday': [
             ('pull_pitchers.py', [today]),
-            ('pull_odds.py',     []),
+            ('pull_odds.py',     []),      # 3 markets only
         ],
         'pregame': [
             ('pull_pitchers.py', [today]),
-            ('pull_odds.py',     []),
+            ('pull_odds.py',     []),      # 3 markets only (F5 on hold)
         ],
         'closing': [
-            ('pull_odds.py',     []),
-            ('pull_results.py',  [today]),
+            ('pull_odds.py',        []),         # 3 markets only (F5 on hold)
+            ('pull_results.py',     [today]),
+            ('pull_linescores.py',  [today]),    # after results; needs game_pk from games table
         ],
     }
 
@@ -162,8 +169,7 @@ def main():
             f'L={grade_summary["rec_counts"]["loss"]} '
             f'P={grade_summary["rec_counts"].get("push",0)} '
             f'V={grade_summary["rec_counts"].get("void",0)}), '
-            f'{grade_summary["bets_graded"]} bets graded, '
-            f'{grade_summary["f5_skipped"]} F5 skipped'
+            f'{grade_summary["bets_graded"]} bets graded'
         )
         log.info(
             f'  CLV: recs filled={clv_summary["rec_filled"]} '
@@ -176,22 +182,56 @@ def main():
         log.error(f'  Grader/CLV raised an exception: {e}')
         results['grader+clv'] = False
 
-    # ── Analyzer (runs after every slot) ──────────────────────────────────────
-    log.info('Running analyzer...')
+    # ── Analyzer: Algo 1 devig (runs after every slot) ────────────────────────
+    log.info('Running analyzer [devig]...')
     try:
         with get_connection() as conn:
             ana = generate_all_recommendations(conn)
         by_cm = ana['by_color_market']
         log.info(
-            f'  Analyzer: {ana["games_analyzed"]} games, '
-            f'{ana["total_written"]} new recs — '
+            f'  Analyzer [devig]: {ana["games_analyzed"]} games, '
+            f'{ana["total_written"]} new recs -- '
             + ', '.join(f'{k}={v}' for k, v in sorted(by_cm.items()))
             + f'; {len(ana["games_no_rec"])} games no rec'
         )
-        results['analyzer'] = True
+        results['analyzer_devig'] = True
     except Exception as e:
-        log.error(f'  Analyzer raised an exception: {e}')
-        results['analyzer'] = False
+        log.error(f'  Analyzer [devig] raised an exception: {e}')
+        results['analyzer_devig'] = False
+
+    # ── Analyzer: Algo 2 model (runs after every slot) ────────────────────────
+    log.info('Running analyzer [model_v1]...')
+    try:
+        with get_connection() as conn:
+            mana = generate_model_recommendations(conn)
+        by_cm2 = mana['by_color_market']
+        log.info(
+            f'  Analyzer [model_v1]: {mana["games_analyzed"]} games, '
+            f'{mana["total_written"]} new recs, '
+            f'{mana["abstained"]} abstained -- '
+            + (', '.join(f'{k}={v}' for k, v in sorted(by_cm2.items())) or 'none')
+        )
+        results['analyzer_model'] = True
+
+        # Algo 2 digest — pregame and closing only (most complete pitcher data)
+        if slot in ('pregame', 'closing') and mana.get('new_recs'):
+            try:
+                with get_connection() as conn:
+                    game_rows = conn.execute(
+                        'SELECT game_pk, away_team, home_team, game_date, game_datetime_utc FROM games'
+                    ).fetchall()
+                game_lookup = {r['game_pk']: dict(r) for r in game_rows}
+                send_algo2_digest(
+                    mana['new_recs'],
+                    slot_name=slot,
+                    games_analyzed=mana['games_analyzed'],
+                    game_lookup=game_lookup,
+                )
+            except Exception as _de:
+                log.warning(f'  Algo2 digest failed: {_de}')
+    except Exception as e:
+        log.error(f'  Analyzer [model_v1] raised an exception: {e}')
+        results['analyzer_model'] = False
 
     # ── Summary ───────────────────────────────────────────────────────────────
     log.info('-' * 60)

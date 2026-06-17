@@ -15,7 +15,7 @@ import pytz
 from database import get_connection, init_db
 from components.metrics import all_bets, upcoming_games_for_picker, unbet_recs_for_game
 from components.formatters import fmt_american, fmt_dollars, fmt_pct, fmt_game_time
-from components.styles import inject_custom_css, section_head
+from components.styles import inject_custom_css, section_head, page_header
 
 EASTERN = pytz.timezone('US/Eastern')
 
@@ -24,8 +24,7 @@ st.set_page_config(page_title='My Bets — MLB Betting', page_icon='💰', layou
 inject_custom_css()
 init_db()
 
-st.markdown('<div style="font-size:22px;font-weight:700;margin-bottom:20px;">My Bets</div>',
-            unsafe_allow_html=True)
+page_header('MY BETS', 'Bet log & entry')
 
 # ── Section A: Bet entry form ─────────────────────────────────────────────────
 section_head('LOG A BET')

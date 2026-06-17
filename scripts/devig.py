@@ -48,6 +48,30 @@ def devig_two_way(prob_a: float, prob_b: float) -> tuple[float, float]:
     return (prob_a / total, prob_b / total)
 
 
+def stake_units(recommended_stake_pct: float) -> float:
+    """Convert stake_pct to units: 0.02→2u, 0.01→1u, 0.0→0.5u (red/shadow floor)."""
+    if recommended_stake_pct >= 0.02:
+        return 2.0
+    if recommended_stake_pct >= 0.01:
+        return 1.0
+    return 0.5
+
+
+def unit_payout(result: str, price_american: int, stake_units_val: float) -> float:
+    """
+    Unit profit for a graded recommendation.
+    Win:       stake_units × (decimal_odds − 1)
+    Loss:      −stake_units
+    Push/Void: 0.0
+    """
+    if result in ('push', 'void'):
+        return 0.0
+    if result == 'loss':
+        return round(-stake_units_val, 4)
+    dec = american_to_decimal(price_american)
+    return round(stake_units_val * (dec - 1), 4)
+
+
 def edge_percent(offered_price_american: int, fair_price_american: int) -> float:
     """
     Expected value as a percentage of stake.

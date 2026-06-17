@@ -14,15 +14,14 @@ from database import get_connection, init_db
 from settings import get_bankroll, set_bankroll, get_setting
 from components.metrics import data_status
 from components.formatters import fmt_datetime_et
-from components.styles import inject_custom_css, section_head
+from components.styles import inject_custom_css, section_head, page_header
 
 st.set_page_config(page_title='Settings — MLB Betting', page_icon='⚙️', layout='wide',
                    initial_sidebar_state='expanded')
 inject_custom_css()
 init_db()
 
-st.markdown('<div style="font-size:22px;font-weight:700;margin-bottom:20px;">Settings</div>',
-            unsafe_allow_html=True)
+page_header('SETTINGS', 'Bankroll & data health')
 
 # ── Bankroll ──────────────────────────────────────────────────────────────────
 section_head('BANKROLL')

@@ -1,8 +1,7 @@
 """
 styles.py — All visual styling for the MLB Betting dashboard.
 
-Design target: premium dark-mode trading terminal.
-Reference palette: TradingView dark + Bloomberg terminal density.
+Design target: Binance data density + Robinhood page hierarchy.
 """
 
 import streamlit as st
@@ -17,10 +16,13 @@ C_SURFACE    = '#131722'   # card / sidebar surface
 C_BORDER     = '#1E2430'   # hairline borders
 C_ACCENT     = '#00D4AA'   # teal — primary signal, used sparingly
 C_YELLOW     = '#FFB454'   # amber — yellow signal
+C_RED        = '#F6465D'   # Binance red — negative values
 C_RED_MUTED  = '#6E3B47'   # desaturated red — shadow/control, intentionally dim
 C_TEXT       = '#E6E9EF'   # primary text
 C_MUTED      = '#8B92A8'   # secondary / label text
+C_LABEL      = '#6B7280'   # tile labels — clearly subordinate
 C_GRID       = '#1A1F2E'   # chart gridlines
+C_MODEL      = '#8B5CF6'   # purple — Algo 2 model signal
 
 SLOT_TIMES = [
     ('morning',  7,  0),
@@ -38,23 +40,20 @@ def inject_custom_css():
 /* ── Font imports ─────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600&display=swap');
 
-/* ── Hide Streamlit branding — NOT the header bar itself ─ */
-/* stHeader contains the sidebar toggle; hiding it removes  */
-/* the only way to reopen the nav. Hide children instead.  */
+/* ── Hide Streamlit branding — surgical targeting only ─── */
+/* RULE: never hide stToolbar or any button broadly —       */
+/* Streamlit 1.58+ puts the sidebar toggle inside stToolbar */
+/* and inside header buttons; hiding them kills navigation. */
 footer {{ visibility: hidden; }}
 #MainMenu {{ visibility: hidden; }}
 .stDeployButton {{ display: none !important; }}
 [data-testid="stDecoration"] {{ display: none !important; }}
-
-/* Hide the app menu (⋮) and the top-right toolbar icons,  */
-/* but NOT the sidebar chevron button.                     */
-[data-testid="stToolbar"] {{ display: none !important; }}
-[data-testid="stHeader"] button[kind="header"] {{ display: none !important; }}
-
-/* Keep the header bar itself, but collapse its height so  */
-/* it doesn't waste vertical space. The sidebar chevron    */
-/* (data-testid="collapsedControl" / "stSidebarCollapsedControl") */
-/* is rendered in the sidebar, not the header, so it's safe. */
+/* Hide only the app-menu dots and status widget, NOT the   */
+/* full toolbar (sidebar toggle lives there in 1.58+).      */
+[data-testid="stMainMenuDots"] {{ display: none !important; }}
+[data-testid="stStatusWidget"] {{ display: none !important; }}
+/* Collapse header height but keep overflow visible so the  */
+/* sidebar toggle (rendered as a sibling, not child) shows. */
 [data-testid="stHeader"] {{
     background: transparent !important;
     border-bottom: none !important;
@@ -63,21 +62,33 @@ footer {{ visibility: hidden; }}
     padding: 0 !important;
     overflow: visible !important;
 }}
-/* The actual collapse toggle lives outside stHeader — leave it alone */
+
+/* ── Kill Streamlit's generous default padding ────────── */
+.block-container {{
+    padding-top: 1.5rem !important;
+    padding-bottom: 1rem !important;
+    max-width: 1200px !important;
+}}
 
 /* ── Global typography ────────────────────────────────── */
 html, body, [class*="css"] {{
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }}
 
-/* ── Metric tile override ─────────────────────────────── */
+/* ── Metric tile override (st.metric) ─────────────────── */
 [data-testid="metric-container"] {{
-    background: {C_SURFACE};
+    background: linear-gradient(180deg, #161B26 0%, #11151E 100%);
     border: 1px solid {C_BORDER};
-    border-radius: 6px;
-    padding: 16px 18px !important;
+    border-radius: 10px;
+    padding: 14px 16px !important;
     position: relative;
     overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    transition: border-color 0.12s ease, transform 0.12s ease;
+}}
+[data-testid="metric-container"]:hover {{
+    border-color: #2A3242;
+    transform: translateY(-1px);
 }}
 [data-testid="metric-container"]::before {{
     content: '';
@@ -88,16 +99,17 @@ html, body, [class*="css"] {{
 }}
 [data-testid="stMetricLabel"] {{
     font-size: 10px !important;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: {C_MUTED} !important;
+    color: {C_LABEL} !important;
 }}
 [data-testid="stMetricValue"] {{
     font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace !important;
-    font-size: 22px !important;
-    font-weight: 500 !important;
+    font-size: 32px !important;
+    font-weight: 600 !important;
     font-variant-numeric: tabular-nums;
-    color: {C_TEXT} !important;
+    color: #FFFFFF !important;
+    line-height: 1.1;
 }}
 [data-testid="stMetricDelta"] {{
     font-size: 11px !important;
@@ -112,7 +124,7 @@ html, body, [class*="css"] {{
     font-size: 10px !important;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: {C_MUTED} !important;
+    color: {C_LABEL} !important;
     border-bottom: 1px solid {C_BORDER} !important;
     padding: 8px 10px !important;
     background: {C_SURFACE} !important;
@@ -131,7 +143,7 @@ html, body, [class*="css"] {{
 /* ── Divider ──────────────────────────────────────────── */
 hr {{
     border-color: {C_BORDER} !important;
-    margin: 20px 0 !important;
+    margin: 14px 0 !important;
 }}
 
 /* ── Expander ─────────────────────────────────────────── */
@@ -174,7 +186,6 @@ hr {{
     padding-top: 20px !important;
 }}
 
-/* Wordmark injected via ::before on the sidebar content */
 [data-testid="stSidebarContent"]::before {{
     content: 'CMJ BETS';
     display: block;
@@ -213,7 +224,7 @@ hr {{
     background: rgba(0,212,170,0.07);
 }}
 
-/* ── Status bar ───────────────────────────────────────── */
+/* ── Status bar (thinner, full-bleed) ─────────────────── */
 .status-bar {{
     display: flex;
     justify-content: space-between;
@@ -221,16 +232,17 @@ hr {{
     background: {C_SURFACE};
     border: 1px solid {C_BORDER};
     border-radius: 6px;
-    padding: 8px 16px;
-    margin-bottom: 24px;
+    padding: 0 16px;
+    height: 34px;
+    margin-bottom: 16px;
     font-size: 11px;
     letter-spacing: 0.05em;
 }}
 .status-left {{ display: flex; align-items: center; gap: 8px; }}
-.status-right {{ display: flex; align-items: center; gap: 12px; color: {C_MUTED}; }}
+.status-right {{ display: flex; align-items: center; gap: 12px; color: {C_LABEL}; }}
 .status-live-text {{ font-weight: 600; color: {C_ACCENT}; }}
 .status-stale-text {{ font-weight: 600; color: {C_YELLOW}; }}
-.status-sub {{ color: {C_MUTED}; }}
+.status-sub {{ color: {C_LABEL}; }}
 .status-divider {{ color: {C_BORDER}; margin: 0 4px; }}
 
 @keyframes pulse-dot {{
@@ -247,87 +259,138 @@ hr {{
     border-radius: 50%; background: {C_YELLOW};
 }}
 
+/* ── Page header ──────────────────────────────────────── */
+.page-header {{
+    margin-bottom: 16px;
+}}
+.page-header-overline {{
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: {C_ACCENT};
+    margin-bottom: 4px;
+    font-family: 'JetBrains Mono', monospace;
+}}
+.page-header-headline {{
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #FFFFFF;
+    line-height: 1.15;
+}}
+
 /* ── Custom metric grid tiles ─────────────────────────── */
 .metrics-grid {{
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 12px;
-    margin-bottom: 8px;
+    gap: 10px;
+    margin-bottom: 6px;
 }}
 .m-tile {{
-    background: {C_SURFACE};
+    background: linear-gradient(180deg, #161B26 0%, #11151E 100%);
     border: 1px solid {C_BORDER};
-    border-top: 2px solid {C_BORDER};
-    border-radius: 6px;
-    padding: 16px 18px;
+    border-radius: 10px;
+    padding: 14px 16px;
     position: relative;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    transition: border-color 0.12s ease, transform 0.12s ease;
+    cursor: default;
 }}
-.m-tile.positive {{ border-top-color: {C_ACCENT}; }}
-.m-tile.negative {{ border-top-color: {C_RED_MUTED}; }}
-.m-tile.neutral  {{ border-top-color: {C_BORDER}; }}
+.m-tile:hover {{
+    border-color: #2A3242;
+    transform: translateY(-1px);
+}}
+.m-tile.positive {{ border-top: 2px solid {C_ACCENT}; }}
+.m-tile.negative {{ border-top: 2px solid {C_RED}; }}
+.m-tile.neutral  {{ border-top: 2px solid {C_BORDER}; }}
+.m-tile.empty    {{ opacity: 0.55; }}
 .m-label {{
     font-size: 10px;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: {C_MUTED};
-    margin-bottom: 8px;
+    color: {C_LABEL};
+    margin-bottom: 6px;
 }}
 .m-value {{
     font-family: 'JetBrains Mono', monospace;
-    font-size: 22px;
-    font-weight: 500;
-    color: {C_TEXT};
+    font-size: 32px;
+    font-weight: 600;
+    color: #FFFFFF;
     font-variant-numeric: tabular-nums;
     line-height: 1.1;
 }}
-.m-value.accent {{ color: {C_ACCENT}; }}
-.m-value.yellow {{ color: {C_YELLOW}; }}
-.m-value.muted  {{ color: {C_MUTED}; }}
+.m-value.accent   {{ color: {C_ACCENT}; }}
+.m-value.negative {{ color: {C_RED}; }}
+.m-value.yellow   {{ color: {C_YELLOW}; }}
+.m-value.muted    {{ color: {C_MUTED}; }}
 .m-delta {{
     font-size: 11px;
     color: {C_MUTED};
-    margin-top: 5px;
+    margin-top: 4px;
     font-family: 'JetBrains Mono', monospace;
 }}
 
-/* ── Empty state terminal cards ───────────────────────── */
+/* ── Empty state — designed moments, not voids ────────── */
 .empty-state {{
-    background: {C_SURFACE};
+    background: linear-gradient(180deg, #161B26 0%, #11151E 100%);
     border: 1px solid {C_BORDER};
-    border-radius: 6px;
-    padding: 28px 32px;
-    text-align: center;
-    color: {C_MUTED};
+    border-radius: 10px;
+    padding: 20px 28px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    max-height: 120px;
+    box-sizing: border-box;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}}
+.empty-state-glyph {{
+    font-size: 22px;
+    color: {C_ACCENT};
+    opacity: 0.45;
+    flex-shrink: 0;
+    line-height: 1;
+    font-family: 'JetBrains Mono', monospace;
+}}
+.empty-state-body {{
+    min-width: 0;
 }}
 .empty-state-lead {{
-    font-size: 12px;
+    font-size: 15px;
     font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: {C_MUTED};
-    margin-bottom: 8px;
+    color: #FFFFFF;
+    margin-bottom: 3px;
+    letter-spacing: -0.01em;
 }}
 .empty-state-sub {{
-    font-size: 12px;
+    font-size: 13px;
+    color: {C_MUTED};
+    margin-bottom: 3px;
+}}
+.empty-state-preview {{
+    font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
-    color: {C_BORDER};
-    margin-top: 6px;
-    letter-spacing: 0.04em;
+    color: {C_LABEL};
+    letter-spacing: 0.03em;
 }}
 
 /* ── Play cards (Today page) ──────────────────────────── */
 .play-card {{
     display: flex;
     align-items: stretch;
-    background: {C_SURFACE};
+    background: linear-gradient(180deg, #161B26 0%, #11151E 100%);
     border: 1px solid {C_BORDER};
-    border-radius: 6px;
-    margin-bottom: 12px;
+    border-radius: 10px;
+    margin-bottom: 10px;
     overflow: hidden;
     position: relative;
-    transition: border-color 0.15s ease;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    transition: border-color 0.12s ease, transform 0.12s ease;
 }}
-.play-card:hover {{ border-color: #2A3248; }}
+.play-card:hover {{
+    border-color: #2A3242;
+    transform: translateY(-1px);
+}}
 .card-stripe {{
     width: 4px;
     flex-shrink: 0;
@@ -335,20 +398,20 @@ hr {{
 }}
 .play-card.sig-green .card-stripe {{ background: {C_ACCENT}; }}
 .play-card.sig-green {{
-    box-shadow: 0 0 24px rgba(0,212,170,0.07), inset 0 0 0 1px rgba(0,212,170,0.08);
+    box-shadow: 0 0 24px rgba(0,212,170,0.07), inset 0 1px 0 rgba(255,255,255,0.03);
 }}
 .play-card.sig-yellow .card-stripe {{ background: {C_YELLOW}; }}
 .play-card.sig-red .card-stripe {{ background: {C_RED_MUTED}; opacity: 0.7; }}
 
 .card-body {{
     flex: 1;
-    padding: 16px 20px;
+    padding: 14px 18px;
     min-width: 0;
 }}
 .card-teams {{
     font-size: 16px;
     font-weight: 600;
-    color: {C_TEXT};
+    color: #FFFFFF;
     letter-spacing: 0.01em;
     white-space: nowrap;
     overflow: hidden;
@@ -356,18 +419,18 @@ hr {{
 }}
 .card-time {{
     font-size: 11px;
-    color: {C_MUTED};
+    color: {C_LABEL};
     margin-top: 2px;
     font-family: 'JetBrains Mono', monospace;
 }}
 .card-pitching {{
     font-size: 12px;
     color: {C_MUTED};
-    margin-top: 8px;
+    margin-top: 6px;
 }}
 .card-market-tag {{
     display: inline-block;
-    margin-top: 10px;
+    margin-top: 8px;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.1em;
@@ -382,7 +445,7 @@ hr {{
 .play-card.sig-yellow .card-market-tag {{ color: {C_YELLOW}; border-color: rgba(255,180,84,0.2); background: rgba(255,180,84,0.06); }}
 
 .card-prices {{
-    padding: 16px 24px;
+    padding: 14px 22px;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -395,7 +458,7 @@ hr {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 28px;
     font-weight: 600;
-    color: {C_TEXT};
+    color: #FFFFFF;
     font-variant-numeric: tabular-nums;
     line-height: 1;
 }}
@@ -406,14 +469,14 @@ hr {{
 .price-fair {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: {C_MUTED};
+    color: {C_LABEL};
     margin-top: 4px;
 }}
 .price-edge {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
     font-weight: 600;
-    margin-top: 8px;
+    margin-top: 6px;
     letter-spacing: 0.04em;
 }}
 .play-card.sig-green .price-edge {{ color: {C_ACCENT}; }}
@@ -422,19 +485,119 @@ hr {{
 .price-stake {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: {C_MUTED};
+    color: {C_LABEL};
     margin-top: 3px;
 }}
 .price-books {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     color: {C_BORDER};
-    margin-top: 6px;
+    margin-top: 5px;
     letter-spacing: 0.06em;
 }}
 
+/* ── Model (Algo 2) card variant ──────────────────────── */
+.play-card.sig-model .card-stripe {{ background: {C_MODEL}; }}
+.play-card.sig-model {{
+    box-shadow: 0 0 24px rgba(139,92,246,0.07), inset 0 1px 0 rgba(255,255,255,0.03);
+    border-color: rgba(139,92,246,0.25);
+}}
+.play-card.sig-model .card-market-tag {{
+    color: {C_MODEL}; border-color: rgba(139,92,246,0.25); background: rgba(139,92,246,0.07);
+}}
+.play-card.sig-model .price-target {{ color: {C_MODEL}; }}
+.play-card.sig-model .price-edge {{ color: {C_MODEL}; }}
+
+.model-notes {{
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: {C_LABEL};
+    margin-top: 6px;
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+}}
+
+/* ── F5 market badge ──────────────────────────────────── */
+.f5-badge {{
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(255,180,84,0.10);
+    border: 1px solid rgba(255,180,84,0.28);
+    color: {C_YELLOW};
+    margin-left: 8px;
+    vertical-align: middle;
+}}
+
+/* ── First-inning (YRFI/NRFI) badge ──────────────────── */
+.first-inn-badge {{
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(139,92,246,0.12);
+    border: 1px solid rgba(139,92,246,0.30);
+    color: {C_MODEL};
+    margin-left: 8px;
+    vertical-align: middle;
+}}
+
+/* ── Both-algos badge ─────────────────────────────────── */
+.both-algos-badge {{
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, rgba(0,212,170,0.15), rgba(139,92,246,0.15));
+    border: 1px solid rgba(139,92,246,0.3);
+    color: {C_MODEL};
+    margin-left: 8px;
+    vertical-align: middle;
+}}
+
+/* ── Algo section divider ─────────────────────────────── */
+.algo-section-header {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 20px 0 12px 0;
+}}
+.algo-section-label {{
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: {C_MUTED};
+    border-bottom: 1px solid {C_BORDER};
+    padding-bottom: 6px;
+    flex: 1;
+}}
+.algo-section-label.model-label {{ color: {C_MODEL}; border-color: rgba(139,92,246,0.25); }}
+.algo-unproven-tag {{
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: {C_LABEL};
+    background: rgba(139,92,246,0.08);
+    border: 1px solid rgba(139,92,246,0.18);
+    border-radius: 3px;
+    padding: 2px 7px;
+    white-space: nowrap;
+}}
+
 /* ── Log bet button below card ────────────────────────── */
-.log-btn-wrap {{ margin-top: -6px; margin-bottom: 18px; text-align: right; }}
+.log-btn-wrap {{ margin-top: -6px; margin-bottom: 16px; text-align: right; }}
 
 /* ── Shadow ledger header ─────────────────────────────── */
 .shadow-header {{
@@ -443,7 +606,7 @@ hr {{
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: {C_RED_MUTED};
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }}
 
 /* ── Section headings in terminal style ───────────────── */
@@ -454,9 +617,38 @@ hr {{
     text-transform: uppercase;
     color: {C_MUTED};
     border-bottom: 1px solid {C_BORDER};
-    padding-bottom: 8px;
-    margin: 24px 0 16px 0;
+    padding-bottom: 6px;
+    margin: 20px 0 10px 0;
 }}
+
+/* ══ DO NOT REMOVE — sidebar nav must survive all future styling passes ══════ */
+/* Streamlit 1.58 collapses the sidebar via translateX/margin-left, not         */
+/* display:none. Force it open permanently — this is a personal tool, always-  */
+/* open sidebar is acceptable and far better than an inaccessible nav.          */
+[data-testid="stSidebar"] {{
+    display: flex !important;
+    visibility: visible !important;
+    min-width: 244px !important;
+    width: 244px !important;
+    transform: translateX(0) !important;
+    margin-left: 0 !important;
+    left: 0 !important;
+    position: relative !important;
+    flex-shrink: 0 !important;
+}}
+[data-testid="stSidebarCollapsedControl"] {{
+    display: none !important;
+}}
+[data-testid="stSidebarNavCollapseButton"] {{
+    display: none !important;
+}}
+[data-testid="stSidebarNavItems"],
+[data-testid="stSidebarNav"],
+[data-testid="stSidebarContent"] {{
+    visibility: visible !important;
+    display: block !important;
+}}
+/* ══════════════════════════════════════════════════════════════════════════ */
 </style>
 """, unsafe_allow_html=True)
 
@@ -483,8 +675,17 @@ def _next_slot() -> str:
         if now < slot_today:
             label = slot_today.strftime('%I:%M %p ET').lstrip('0')
             return f'{name.upper()} {label}'
-    # all today's slots passed — next is morning tomorrow
     return 'MORNING 7:00 AM ET'
+
+
+def page_header(overline: str, headline: str) -> None:
+    """Render the page header: small teal overline + large white headline."""
+    st.markdown(f"""
+<div class="page-header">
+  <div class="page-header-overline">{overline}</div>
+  <div class="page-header-headline">{headline}</div>
+</div>
+""", unsafe_allow_html=True)
 
 
 def status_bar(last_snapshot_utc: str, requests_remaining, last_db_update_utc: str) -> None:
@@ -525,10 +726,19 @@ def status_bar(last_snapshot_utc: str, requests_remaining, last_db_update_utc: s
 def metric_tile(label: str, value: str, delta: str = '',
                 accent: str = 'neutral') -> str:
     """Return HTML for one metric tile. accent: 'positive'|'negative'|'neutral'."""
-    val_class = 'accent' if accent == 'positive' else ('muted' if accent == 'negative' else '')
+    is_empty = value in ('—', '', 'NO DATA', None)
+    tile_cls = f'{accent}' + (' empty' if is_empty else '')
+
+    if accent == 'positive':
+        val_class = 'accent'
+    elif accent == 'negative':
+        val_class = 'negative'
+    else:
+        val_class = 'muted' if is_empty else ''
+
     delta_html = f'<div class="m-delta">{delta}</div>' if delta else ''
     return f"""
-<div class="m-tile {accent}">
+<div class="m-tile {tile_cls}">
   <div class="m-label">{label}</div>
   <div class="m-value {val_class}">{value}</div>
   {delta_html}
@@ -543,13 +753,18 @@ def metrics_row(tiles: list[str]) -> None:
     )
 
 
-def empty_state(lead: str, sub: str = '') -> None:
-    """Render a terminal-voice empty state card."""
-    sub_html = f'<div class="empty-state-sub">{sub}</div>' if sub else ''
+def empty_state(lead: str, sub: str = '', preview: str = '') -> None:
+    """Render a designed empty-state card with glyph, headline, explanation, and feature preview."""
+    sub_html     = f'<div class="empty-state-sub">{sub}</div>' if sub else ''
+    preview_html = f'<div class="empty-state-preview">{preview}</div>' if preview else ''
     st.markdown(f"""
 <div class="empty-state">
-  <div class="empty-state-lead">{lead}</div>
-  {sub_html}
+  <div class="empty-state-glyph">◇</div>
+  <div class="empty-state-body">
+    <div class="empty-state-lead">{lead}</div>
+    {sub_html}
+    {preview_html}
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -568,19 +783,22 @@ def play_card(rec: dict) -> str:
     pitching = f'{away_p} vs {home_p}'
     mkt_str  = market_label(rec['market'], rec['side'], rec.get('line')).upper()
 
-    target   = fmt_american(rec['target_price_american'])
-    fair     = fmt_american(rec['fair_price_american'])
-    edge     = rec.get('edge_percent', 0)
-    edge_str = f'+{edge:.2f}%' if edge >= 0 else f'{edge:.2f}%'
-    stake    = rec.get('recommended_stake_dollars_at_2500', 0)
+    target    = fmt_american(rec['target_price_american'])
+    fair      = fmt_american(rec['fair_price_american'])
+    edge      = rec.get('edge_percent', 0)
+    edge_str  = f'+{edge:.2f}%' if edge >= 0 else f'{edge:.2f}%'
+    stake     = rec.get('recommended_stake_dollars_at_2500', 0)
     stake_str = f'${stake:.0f}' if stake else '—'
-    books    = rec.get('num_books_in_consensus', 0)
+    books     = rec.get('num_books_in_consensus', 0)
+
+    is_f5     = rec.get('market', '') in ('f5_moneyline', 'f5_total')
+    f5_badge  = '<span class="f5-badge">F5</span>' if is_f5 else ''
 
     return f"""
 <div class="play-card {sig_cls}">
   <div class="card-stripe"></div>
   <div class="card-body">
-    <div class="card-teams">{teams}</div>
+    <div class="card-teams">{teams}{f5_badge}</div>
     <div class="card-time">{gametime}</div>
     <div class="card-pitching">{pitching}</div>
     <div class="card-market-tag">{mkt_str}</div>
@@ -590,6 +808,56 @@ def play_card(rec: dict) -> str:
     <div class="price-fair">fair {fair}</div>
     <div class="price-edge">{edge_str} EDGE</div>
     <div class="price-stake">stake {stake_str} @ $2500</div>
+    <div class="price-books">{books} BOOKS</div>
+  </div>
+</div>"""
+
+
+def model_play_card(rec: dict, has_devig_match: bool = False) -> str:
+    """Return HTML for an Algo 2 model play card (purple accent)."""
+    from components.formatters import fmt_american, fmt_game_time, market_label
+
+    color   = rec.get('confidence_color', 'red')
+    # Model cards always use sig-model stripe; dim opacity for lower signals
+    opacity = '1' if color == 'green' else ('0.88' if color == 'yellow' else '0.72')
+
+    teams    = f"{rec['away_team']} @ {rec['home_team']}"
+    gametime = fmt_game_time(rec.get('game_datetime_utc', ''))
+    away_p   = rec.get('away_pitcher') or 'TBD'
+    home_p   = rec.get('home_pitcher') or 'TBD'
+    pitching = f'{away_p} vs {home_p}'
+    mkt_str  = market_label(rec['market'], rec['side'], rec.get('line')).upper()
+
+    target     = fmt_american(rec['target_price_american'])
+    model_prob = rec.get('model_probability')
+    prob_str   = f'{model_prob:.1%}' if model_prob is not None else '—'
+    edge       = rec.get('edge_percent', 0)
+    edge_str   = f'+{edge:.2f}%' if edge >= 0 else f'{edge:.2f}%'
+    books      = rec.get('num_books_in_consensus', 0)
+    notes      = rec.get('model_notes') or ''
+
+    is_f5         = rec.get('market', '') in ('f5_moneyline', 'f5_total')
+    is_first_inn  = rec.get('market', '') in ('yrfi', 'nrfi')
+    f5_badge      = '<span class="f5-badge">F5</span>' if is_f5 else ''
+    first_inn_badge = '<span class="first-inn-badge">1ST INN</span>' if is_first_inn else ''
+    both_badge    = '<span class="both-algos-badge">BOTH ALGOS</span>' if has_devig_match else ''
+    notes_html = f'<div class="model-notes">{notes}</div>' if notes else ''
+
+    return f"""
+<div class="play-card sig-model" style="opacity:{opacity}">
+  <div class="card-stripe"></div>
+  <div class="card-body">
+    <div class="card-teams">{teams}{f5_badge}{first_inn_badge}{both_badge}</div>
+    <div class="card-time">{gametime}</div>
+    <div class="card-pitching">{pitching}</div>
+    <div class="card-market-tag">{mkt_str}</div>
+    {notes_html}
+  </div>
+  <div class="card-prices">
+    <div class="price-target">{target}</div>
+    <div class="price-fair">model p={prob_str}</div>
+    <div class="price-edge">{edge_str} EDGE</div>
+    <div class="price-stake">paper · $25/pick</div>
     <div class="price-books">{books} BOOKS</div>
   </div>
 </div>"""

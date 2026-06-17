@@ -2,7 +2,27 @@
   "permissions": {
     "allow": [
       "PowerShell(winget --version)",
-      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); python --version)"
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); python --version)",
+      "Read(//mnt/c/Users/Connor/Documents/**)",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "mcp__Claude_Preview__preview_start",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(python -c ' *)",
+      "Bash(python scripts/smoke_test.py)",
+      "Bash(pip show *)",
+      "Bash(python -c \"import streamlit\")",
+      "PowerShell(Get-Command python | Select-Object -ExpandProperty Source; \\(Get-ChildItem \"C:\\\\Users\\\\Connor\" -Recurse -Name \"streamlit.exe\" -ErrorAction SilentlyContinue | Select-Object -First 3\\))",
+      "Bash(venv/Scripts/python.exe scripts/smoke_test.py)",
+      "Bash(xargs rm -rf)",
+      "Bash(Start-Process -FilePath \"run_dashboard.bat\" -WindowStyle Normal)",
+      "Bash(cmd /c run_dashboard.bat)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8501/)",
+      "Bash(taskkill /F /IM streamlit.exe)",
+      "Bash(taskkill /F /IM python.exe /FI \"WINDOWTITLE eq streamlit*\")",
+      "Bash(netstat -ano)",
+      "Bash(awk '{print $5}')",
+      "Bash(xargs -I{} taskkill /F /PID {})",
+      "PowerShell(Get-Process | Where-Object { $_.Name -match 'python|streamlit' } | ForEach-Object { Write-Host \"$\\($_.Id\\) $\\($_.Name\\) $\\($_.MainWindowTitle\\)\"; Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }; Write-Host \"killed\")"
     ]
   }
 }

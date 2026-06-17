@@ -9,6 +9,10 @@ from devig import american_to_probability, probability_to_american, devig_two_wa
 
 log = get_logger('consensus')
 
+# F5 variants map to the same consensus logic as their full-game counterparts
+_MONEYLINE_MARKETS = ('moneyline', 'f5_moneyline')
+_TOTAL_MARKETS     = ('total',     'f5_total')
+
 
 # ── Snapshot retrieval ────────────────────────────────────────────────────────
 
@@ -79,11 +83,11 @@ def compute_consensus_fair_price(snapshots: list, market: str) -> dict | None:
         num_books               int
     Or None if consensus cannot be computed.
     """
-    if market == 'moneyline':
+    if market in _MONEYLINE_MARKETS:
+        # f5_moneyline uses identical consensus logic to moneyline (home/away sides)
         sides = ('home', 'away')
         consensus_line = None
 
-        # Group by book: need both sides present
         by_book: dict[str, dict] = defaultdict(dict)
         for row in snapshots:
             if row['outcome_type'] in sides:
@@ -94,7 +98,7 @@ def compute_consensus_fair_price(snapshots: list, market: str) -> dict | None:
 
         for book, prices in by_book.items():
             if not all(s in prices for s in sides):
-                continue   # book is missing one side
+                continue
             prob_home = american_to_probability(prices['home'])
             prob_away = american_to_probability(prices['away'])
             dv_home, dv_away = devig_two_way(prob_home, prob_away)
@@ -116,17 +120,18 @@ def compute_consensus_fair_price(snapshots: list, market: str) -> dict | None:
             'num_books':           included_books,
         }
 
-    elif market == 'total':
+    elif market in _TOTAL_MARKETS:
+        # f5_total uses identical consensus logic to total (over/under, modal line).
+        # F5 lines are typically 4.5/5.0/5.5; the modal-line logic handles small
+        # float values cleanly since it keys on the line value, not its magnitude.
         sides = ('over', 'under')
 
-        # Group by (book, line): need both over+under at the same line
         by_book_line: dict[tuple, dict] = defaultdict(dict)
         for row in snapshots:
             if row['outcome_type'] in sides and row['line'] is not None:
                 key = (row['book'], row['line'])
                 by_book_line[key][row['outcome_type']] = row['price_american']
 
-        # Find modal line across all (book, line) groups
         line_counts: dict[float, int] = defaultdict(int)
         for (book, line), prices in by_book_line.items():
             if all(s in prices for s in sides):
@@ -137,7 +142,6 @@ def compute_consensus_fair_price(snapshots: list, market: str) -> dict | None:
 
         consensus_line = _modal_line(line_counts)
 
-        # Only use books that have both sides at the modal line
         devigged_probs: dict[str, list] = defaultdict(list)
         included_books = 0
 
@@ -201,7 +205,6 @@ def find_edges_for_game(conn, game_pk: int, market: str,
     latest: dict[tuple, dict] = {}
     for row in snapshots:
         key = (row['book'], row['outcome_type'], row.get('line'))
-        # Keep only the latest per key (snapshots already filtered, but be safe)
         if key not in latest or row['snapshot_time_utc'] > latest[key]['snapshot_time_utc']:
             latest[key] = row
 
@@ -209,8 +212,8 @@ def find_edges_for_game(conn, game_pk: int, market: str,
     for (book, outcome_type, line), row in latest.items():
         if outcome_type not in consensus['fair_prob']:
             continue
-        # For totals, only score the consensus line
-        if market == 'total' and line != consensus['consensus_line']:
+        # For total markets (full-game or F5), only score the consensus line
+        if market in _TOTAL_MARKETS and line != consensus['consensus_line']:
             continue
 
         fair_p_american = consensus['fair_price_american'][outcome_type]

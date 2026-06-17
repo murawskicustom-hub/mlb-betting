@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import requests
@@ -11,14 +12,21 @@ from team_mapping import translate
 # Load .env from project root (one level above scripts/)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-ODDS_API_KEY = os.getenv('ODDS_API_KEY')
+ODDS_API_KEY  = os.getenv('ODDS_API_KEY')
 ODDS_ENDPOINT = 'https://api.the-odds-api.com/v4/sports/baseball_mlb/odds'
+
+# Markets string for each pull cadence.
+# Budget control: F5 lines post late, so only pregame/closing request them.
+MARKETS_3  = 'h2h,totals,spreads'
+MARKETS_F5 = 'h2h,totals,spreads,h2h_1st_5_innings,totals_1st_5_innings'
 
 # Map Odds API market keys to our normalized market names
 MARKET_MAP = {
-    'h2h':     'moneyline',
-    'totals':  'total',
-    'spreads': 'spread',
+    'h2h':                  'moneyline',
+    'totals':               'total',
+    'spreads':              'spread',
+    'h2h_1st_5_innings':    'f5_moneyline',
+    'totals_1st_5_innings': 'f5_total',
 }
 
 log = get_logger('pull_odds')
@@ -31,7 +39,7 @@ def american_to_decimal(american: int) -> float:
         return round((100 / abs(american)) + 1, 6)
 
 
-def fetch_odds():
+def fetch_odds(markets: str = MARKETS_3):
     """Call The Odds API. Returns (response_json, headers) or (None, None)."""
     if not ODDS_API_KEY:
         log.error('ODDS_API_KEY not set — check your .env file')
@@ -40,10 +48,11 @@ def fetch_odds():
     params = {
         'apiKey':      ODDS_API_KEY,
         'regions':     'us',
-        'markets':     'h2h,totals,spreads',
+        'markets':     markets,
         'oddsFormat':  'american',
         'dateFormat':  'iso',
     }
+    log.info(f'Requesting markets: {markets}')
     try:
         resp = requests.get(ODDS_ENDPOINT, params=params, timeout=15)
         resp.raise_for_status()
@@ -163,11 +172,11 @@ def extract_outcomes(bookmaker, game_pk, snapshot_time_utc):
 
 def resolve_home_away(rows, odds_home, odds_away, mlb_home, mlb_away):
     """
-    For moneyline and spread rows, replace the raw team-name outcome_type
-    with 'home' or 'away'.
+    For moneyline, spread, and f5_moneyline rows, replace the raw team-name
+    outcome_type with 'home' or 'away'.
     """
     for row in rows:
-        if row['market'] in ('moneyline', 'spread'):
+        if row['market'] in ('moneyline', 'spread', 'f5_moneyline'):
             raw = row['_outcome_name']
             if raw == mlb_home or raw == odds_home:
                 row['outcome_type'] = 'home'
@@ -182,31 +191,48 @@ def resolve_home_away(rows, odds_home, odds_away, mlb_home, mlb_away):
     return rows
 
 
-def log_pull(conn, pull_time_utc, games_returned, remaining, used, success, error=None):
+def log_pull(conn, pull_time_utc, games_returned, remaining, used, success,
+             markets: str = MARKETS_3, error=None):
+    # Embed markets string in endpoint field so the log tells us the pull cost.
+    endpoint_label = f'{ODDS_ENDPOINT}?markets={markets}'
     conn.execute("""
         INSERT INTO odds_pulls
             (pull_time_utc, endpoint, games_returned, requests_remaining, requests_used, success, error_message)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (pull_time_utc, ODDS_ENDPOINT, games_returned, remaining, used, 1 if success else 0, error))
+    """, (pull_time_utc, endpoint_label, games_returned, remaining, used, 1 if success else 0, error))
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Pull MLB odds from The Odds API.')
+    parser.add_argument(
+        '--markets', default=MARKETS_3,
+        help=(f'Comma-separated market keys. '
+              f'Default: {MARKETS_3}. '
+              f'With F5: {MARKETS_F5}')
+    )
+    args = parser.parse_args()
+    markets = args.markets
+
     init_db()
 
     pull_time_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     log.info('Fetching MLB odds from The Odds API...')
-    data, headers = fetch_odds()
+    data, headers = fetch_odds(markets=markets)
 
     remaining = int(headers.get('x-requests-remaining', -1)) if headers else -1
     used      = int(headers.get('x-requests-used', -1))      if headers else -1
 
     if data is None:
         with get_connection() as conn:
-            log_pull(conn, pull_time_utc, 0, remaining, used, False, 'API request failed')
+            log_pull(conn, pull_time_utc, 0, remaining, used, False,
+                     markets=markets, error='API request failed')
         sys.exit(1)
 
-    log.info(f'API returned {len(data)} games. Requests remaining: {remaining}')
+    # Count per-market rows for budget logging
+    market_counts: dict[str, int] = {}
+
+    log.info(f'API returned {len(data)} games. Requests remaining: {remaining} (used: {used})')
 
     unmatched    = []
     total_rows   = 0
@@ -240,7 +266,7 @@ def main():
         # Bulk insert all snapshot rows
         for row in snapshot_rows:
             conn.execute("""
-                INSERT INTO odds_snapshots
+                INSERT OR IGNORE INTO odds_snapshots
                     (game_pk, book, market, outcome_type, line,
                      price_american, price_decimal, snapshot_time_utc, api_last_update_utc)
                 VALUES
@@ -248,24 +274,36 @@ def main():
                      :price_american, :price_decimal, :snapshot_time_utc, :api_last_update_utc)
             """, row)
             total_rows += 1
+            mkt = row['market']
+            market_counts[mkt] = market_counts.get(mkt, 0) + 1
 
-        log_pull(conn, pull_time_utc, len(data), remaining, used, True)
+        log_pull(conn, pull_time_utc, len(data), remaining, used, True, markets=markets)
 
     log.info(
         f'Done. {len(data)} games from API, {len(matched_pks)} matched, '
         f'{len(unmatched)} unmatched, {total_rows} snapshot rows inserted.'
     )
+    for mkt, cnt in sorted(market_counts.items()):
+        log.info(f'  {mkt}: {cnt} snapshot rows')
     if unmatched:
         for u in unmatched:
             log.warning(f'  Unmatched: {u["away"]} @ {u["home"]} — {u["reason"]}')
 
+    # F5 coverage summary (helps monitor whether the 4-book gate will pass)
+    f5_games_ml  = len({r['game_pk'] for r in snapshot_rows if r['market'] == 'f5_moneyline'})
+    f5_games_tot = len({r['game_pk'] for r in snapshot_rows if r['market'] == 'f5_total'})
+
     print(
         f'\nOdds pull complete:\n'
+        f'  Markets requested:   {markets}\n'
         f'  Games from API:      {len(data)}\n'
         f'  Matched to DB:       {len(matched_pks)}\n'
         f'  Unmatched:           {len(unmatched)}\n'
         f'  Snapshot rows saved: {total_rows}\n'
-        f'  Requests remaining:  {remaining}\n'
+        f'  Requests remaining:  {remaining} (this pull used: {used})\n'
+        + (f'  F5 ML coverage:      {f5_games_ml} games\n'
+           f'  F5 Total coverage:   {f5_games_tot} games\n'
+           if f5_games_ml or f5_games_tot else '')
     )
 
 

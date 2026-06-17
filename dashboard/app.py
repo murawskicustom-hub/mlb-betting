@@ -15,15 +15,16 @@ import pytz
 
 from database import get_connection, init_db
 from components.metrics import (
-    todays_rec_counts, avg_clv, personal_pl,
+    todays_rec_counts, todays_model_count, avg_clv, avg_clv_by_algo, personal_pl,
     last_update_times, clv_trend, rec_distribution, daily_activity,
 )
 from components.formatters import fmt_dollars, fmt_pct, fmt_date_friendly
 from components.styles import (
     inject_custom_css, status_bar, metric_tile, metrics_row,
-    empty_state, section_head, plotly_dark,
-    C_ACCENT, C_YELLOW, C_MUTED, C_GRID, C_BORDER, C_RED_MUTED,
+    empty_state, section_head, plotly_dark, page_header,
+    C_ACCENT, C_YELLOW, C_MUTED, C_GRID, C_BORDER, C_RED_MUTED, C_MODEL,
 )
+from components.nav_check import render_nav_canary
 
 EASTERN = pytz.timezone('US/Eastern')
 
@@ -35,19 +36,25 @@ st.set_page_config(
 )
 
 inject_custom_css()
+render_nav_canary()
 init_db()
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 with get_connection() as conn:
-    rec_counts = todays_rec_counts(conn)
-    clv_7      = avg_clv(conn, 7)
-    clv_30     = avg_clv(conn, 30)
-    pl_7       = personal_pl(conn, 7)
-    pl_all     = personal_pl(conn, None)
-    upd        = last_update_times(conn)
-    trend_data = clv_trend(conn, 30)
-    dist_data  = rec_distribution(conn, 30)
-    activity   = daily_activity(conn, 7)
+    rec_counts   = todays_rec_counts(conn)    # devig, is_shadow=0 only
+    model_count  = todays_model_count(conn)   # algo 2 observation picks
+    clv_7        = avg_clv(conn, 7)
+    clv_30      = avg_clv(conn, 30)
+    a1_clv_7    = avg_clv_by_algo(conn, 7,  'devig')
+    a1_clv_30   = avg_clv_by_algo(conn, 30, 'devig')
+    a2_clv_7    = avg_clv_by_algo(conn, 7,  'model_v1')
+    a2_clv_30   = avg_clv_by_algo(conn, 30, 'model_v1')
+    pl_7        = personal_pl(conn, 7)
+    pl_all      = personal_pl(conn, None)
+    upd         = last_update_times(conn)
+    trend_data  = clv_trend(conn, 30)
+    dist_data   = rec_distribution(conn, 30)
+    activity    = daily_activity(conn, 7)
 
 # ── Status bar ────────────────────────────────────────────────────────────────
 status_bar(
@@ -56,20 +63,18 @@ status_bar(
     upd['games_last_updated'],
 )
 
-# Page heading
-st.markdown(f"""
-<div style="margin-bottom:20px;">
-  <span style="font-size:26px;font-weight:700;letter-spacing:-0.01em;">MLB Betting Platform</span>
-  <span style="font-size:13px;color:#8B92A8;margin-left:14px;font-family:'JetBrains Mono',monospace;">
-    {fmt_date_friendly(datetime.now(EASTERN)).upper()}
-  </span>
-</div>
-""", unsafe_allow_html=True)
+# Page heading — dynamic headline leads with the fact that matters most
+total_real = rec_counts['green'] + rec_counts['yellow']
+if total_real:
+    _headline = f'{total_real} qualifying edge{"s" if total_real != 1 else ""} today'
+else:
+    _headline = 'No qualifying edges today'
+
+page_header('DASHBOARD', _headline)
 
 # ── Section 1: Metric tiles ───────────────────────────────────────────────────
 section_head('PERFORMANCE SNAPSHOT')
 
-total_real = rec_counts['green'] + rec_counts['yellow']
 plays_val  = str(total_real) if total_real else '—'
 plays_delta = f"{rec_counts['green']}G · {rec_counts['yellow']}Y" if total_real else 'NO QUALIFYING EDGES'
 
@@ -94,6 +99,34 @@ tiles = [
 ]
 metrics_row(tiles)
 
+# Algo 2 subordinate activity line — never uses bettable color language
+if model_count:
+    _a2_label = f'ALGO 2 &middot; {model_count} pick{"s" if model_count != 1 else ""} (paper, units tracked)'
+else:
+    _a2_label = 'ALGO 2 &middot; no picks today'
+st.markdown(
+    f'<div style="font-size:11px;font-family:\'JetBrains Mono\',monospace;'
+    f'color:{C_MODEL};letter-spacing:0.08em;margin:-4px 0 10px 2px;">'
+    f'{_a2_label}</div>',
+    unsafe_allow_html=True,
+)
+
+# Algo comparison row
+def _algo_clv_tile(label, val, color_override=None):
+    if val is None:
+        return metric_tile(label, '—', 'CALIBRATING', 'neutral')
+    accent = 'positive' if val >= 0 else 'negative'
+    return metric_tile(label, fmt_pct(val), '', accent)
+
+algo_tiles = [
+    _algo_clv_tile('ALGO 1 CLV · 7D',  a1_clv_7),
+    _algo_clv_tile('ALGO 1 CLV · 30D', a1_clv_30),
+    _algo_clv_tile('ALGO 2 CLV · 7D',  a2_clv_7),
+    _algo_clv_tile('ALGO 2 CLV · 30D', a2_clv_30),
+    metric_tile('ALGO 2 STATUS', 'SHADOW', '$0 STAKES', 'neutral'),
+]
+metrics_row(algo_tiles)
+
 st.markdown('<br>', unsafe_allow_html=True)
 
 # ── Section 2: CLV trend ──────────────────────────────────────────────────────
@@ -116,8 +149,9 @@ if trend_data:
     st.plotly_chart(fig, width='stretch')
 else:
     empty_state(
-        'AWAITING GRADED PLAYS',
-        'CLV trend activates after first recommendations settle — typically 1-3 days after first plays are graded.'
+        'Awaiting graded plays',
+        'CLV trend activates after first plays are graded.',
+        'CLV TREND · Cumulative closing-line value line chart, updated nightly.'
     )
 
 # ── Section 3: Result distribution ───────────────────────────────────────────
@@ -152,8 +186,9 @@ if dist_data:
     )
 else:
     empty_state(
-        'NO GRADED RECOMMENDATIONS',
-        'Distribution populates once green and yellow plays are graded.'
+        'No graded recommendations yet',
+        'Distribution populates once green and yellow plays are graded.',
+        'RESULT DISTRIBUTION · Win/loss bars by signal color, last 30 days.'
     )
 
 # ── Section 4: Daily activity ─────────────────────────────────────────────────
