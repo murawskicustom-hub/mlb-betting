@@ -23,7 +23,7 @@ from urllib.error import URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from database import get_connection, init_db
+from database import get_connection, init_db, upsert_sql
 from logger import get_logger
 
 log = get_logger('pull_linescores')
@@ -125,16 +125,15 @@ def pull_linescores_for_date(conn, date_str: str) -> int:
             log.warning(f'    game_pk={game_pk}: empty innings list')
             continue
 
-        conn.execute("""
-            INSERT OR REPLACE INTO linescores (
-                game_pk,
-                home_runs_by_inning, away_runs_by_inning,
-                home_f5_runs, away_f5_runs,
-                first_inning_home_runs, first_inning_away_runs,
-                yrfi, f5_total_runs, f5_home_win,
-                status, last_updated_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
+        _ls_cols = [
+            'game_pk',
+            'home_runs_by_inning', 'away_runs_by_inning',
+            'home_f5_runs', 'away_f5_runs',
+            'first_inning_home_runs', 'first_inning_away_runs',
+            'yrfi', 'f5_total_runs', 'f5_home_win',
+            'status', 'last_updated_utc',
+        ]
+        conn.execute(upsert_sql('linescores', _ls_cols, ['game_pk']), (
             game_pk,
             parsed['home_runs_by_inning'], parsed['away_runs_by_inning'],
             parsed['home_f5_runs'],        parsed['away_f5_runs'],

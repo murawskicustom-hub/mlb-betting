@@ -1,21 +1,16 @@
 import sys
 import argparse
-from database import get_connection
+from database import get_connection, list_tables, table_exists
 
 
 def inspect(table):
     with get_connection() as conn:
-        # Verify table exists
-        exists = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-        ).fetchone()
-        if not exists:
+        # Verify table exists (backend-aware metadata lookup)
+        if not table_exists(conn, table):
             print(f"Table '{table}' not found.")
-            tables = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-            ).fetchall()
+            tables = list_tables(conn)
             if tables:
-                print('Available tables:', ', '.join(r[0] for r in tables))
+                print('Available tables:', ', '.join(tables))
             return
 
         row_count = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]

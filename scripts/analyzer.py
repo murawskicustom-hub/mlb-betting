@@ -201,10 +201,11 @@ def generate_recommendations_for_game(conn, game_pk: int) -> tuple[list[int], in
 def generate_all_recommendations(conn) -> dict:
     """Analyze every upcoming game that has odds. Algo 1 (devig) only."""
     upcoming_games = conn.execute("""
-        SELECT DISTINCT g.game_pk
+        SELECT g.game_pk
         FROM games g
         JOIN odds_snapshots o ON o.game_pk = g.game_pk
         WHERE g.status IN ('Scheduled', 'Pre-Game', 'Warmup')
+        GROUP BY g.game_pk, g.game_datetime_utc
         ORDER BY g.game_datetime_utc
     """).fetchall()
 
@@ -292,10 +293,11 @@ def generate_model_recommendations(conn) -> dict:
     now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     upcoming_games = conn.execute("""
-        SELECT DISTINCT g.game_pk
+        SELECT g.game_pk
         FROM games g
         JOIN odds_snapshots o ON o.game_pk = g.game_pk
         WHERE g.status IN ('Scheduled', 'Pre-Game', 'Warmup')
+        GROUP BY g.game_pk, g.game_datetime_utc
         ORDER BY g.game_datetime_utc
     """).fetchall()
 
@@ -501,9 +503,10 @@ def generate_model_recommendations(conn) -> dict:
     """
 
     all_games_for_yrfi = conn.execute("""
-        SELECT DISTINCT g.game_pk
+        SELECT g.game_pk
         FROM games g
         WHERE g.status IN ('Scheduled', 'Pre-Game', 'Warmup')
+        GROUP BY g.game_pk, g.game_datetime_utc
         ORDER BY g.game_datetime_utc
     """).fetchall()
     all_game_pks = [r['game_pk'] for r in all_games_for_yrfi]
