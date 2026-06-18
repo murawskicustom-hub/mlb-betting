@@ -147,6 +147,10 @@ try:
     for label, path in page_files:
         def _run(p=path, lbl=label):
             at = AppTest.from_file(str(p), default_timeout=30)
+            # Pre-authenticate past the password gate so the full page executes
+            # (auth itself is covered separately by verify_auth.py).
+            at.secrets['APP_PASSWORD'] = 'smoketest'
+            at.session_state['authenticated'] = True
             at.run()
             if at.exception:
                 raise RuntimeError('page raised: ' + str(at.exception))

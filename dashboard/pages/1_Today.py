@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import pytz
 
 from database import get_connection, init_db
+from components.auth import require_login
 from components.metrics import recs_for_date, games_for_date
 from components.formatters import fmt_game_time, market_label
 from components.styles import (
@@ -26,6 +27,7 @@ EASTERN = pytz.timezone('US/Eastern')
 st.set_page_config(page_title='Today -- MLB Betting', page_icon='=', layout='wide',
                    initial_sidebar_state='expanded')
 inject_custom_css()
+require_login()   # password gate — nothing below renders until authenticated
 init_db()
 
 # -- Date nav bar ---------------------------------------------------------------

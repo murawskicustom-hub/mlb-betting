@@ -11,6 +11,7 @@ import streamlit as st
 import pandas as pd
 
 from database import get_connection, init_db
+from components.auth import require_login
 from settings import get_bankroll, set_bankroll, get_setting
 from components.metrics import data_status
 from components.formatters import fmt_datetime_et
@@ -19,6 +20,7 @@ from components.styles import inject_custom_css, section_head, page_header
 st.set_page_config(page_title='Settings — MLB Betting', page_icon='⚙️', layout='wide',
                    initial_sidebar_state='expanded')
 inject_custom_css()
+require_login()   # password gate — nothing below renders until authenticated
 init_db()
 
 page_header('SETTINGS', 'Bankroll & data health')

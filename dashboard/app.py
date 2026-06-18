@@ -25,6 +25,7 @@ from components.styles import (
     C_ACCENT, C_YELLOW, C_MUTED, C_GRID, C_BORDER, C_RED_MUTED, C_MODEL,
 )
 from components.nav_check import render_nav_canary
+from components.auth import require_login
 
 EASTERN = pytz.timezone('US/Eastern')
 
@@ -36,6 +37,7 @@ st.set_page_config(
 )
 
 inject_custom_css()
+require_login()   # password gate — nothing below renders until authenticated
 render_nav_canary()
 init_db()
 

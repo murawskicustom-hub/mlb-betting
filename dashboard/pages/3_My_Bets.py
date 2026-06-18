@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import pytz
 
 from database import get_connection, init_db
+from components.auth import require_login
 from components.metrics import all_bets, upcoming_games_for_picker, unbet_recs_for_game
 from components.formatters import fmt_american, fmt_dollars, fmt_pct, fmt_game_time
 from components.styles import inject_custom_css, section_head, page_header
@@ -22,6 +23,7 @@ EASTERN = pytz.timezone('US/Eastern')
 st.set_page_config(page_title='My Bets — MLB Betting', page_icon='💰', layout='wide',
                    initial_sidebar_state='expanded')
 inject_custom_css()
+require_login()   # password gate — nothing below renders until authenticated
 init_db()
 
 page_header('MY BETS', 'Bet log & entry')

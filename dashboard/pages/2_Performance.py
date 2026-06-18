@@ -14,6 +14,7 @@ import pandas as pd
 from datetime import date, timedelta
 
 from database import get_connection, init_db
+from components.auth import require_login
 from components.metrics import (
     unit_summary, unit_breakdown, unit_trend_by_day,
     calibration_by_prob_bucket, yrfi_calibration, head_to_head_recs,
@@ -28,6 +29,7 @@ from components.styles import (
 st.set_page_config(page_title='Performance — MLB Betting', page_icon='o', layout='wide',
                    initial_sidebar_state='expanded')
 inject_custom_css()
+require_login()   # password gate — nothing below renders until authenticated
 init_db()
 
 page_header('PERFORMANCE', 'System performance analytics')
