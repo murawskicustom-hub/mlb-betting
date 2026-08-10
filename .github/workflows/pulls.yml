@@ -1,34 +1,41 @@
-name: MLB data pulls
+name: NFL weekly pulls
 
-# Cloud half of the Stage 4 parallel run. Runs the SAME orchestrator slots the
-# laptop runs, but with DB_BACKEND=postgres so all writes land in Neon.
+# Runs the weekly slot orchestrator (scripts/run_slot.py) on the cadence from
+# the rulebook: Tue research -> Thu lock -> Sun lock -> Mon lock -> Tue grade.
+# This replaces the old MLB daily morning/midday/pregame/closing cron — NFL
+# has games on 3 days a week, not every day, so a weekly/day-specific cron
+# schedule is the correct fit (and burns far fewer Actions minutes + Odds API
+# credits than a daily poll would).
 #
-# Cron is UTC. ET is UTC-4 during summer DST (EDT), so the UTC times below map to:
-#   morning  11:00 UTC = 07:00 EDT
-#   midday   16:00 UTC = 12:00 EDT
-#   pregame  21:00 UTC = 17:00 EDT
-#   closing  03:00 UTC = 23:00 EDT (previous ET day)
-# NOTE: these are fixed UTC offsets for EDT. When ET returns to EST (UTC-5) the
-# ET clock times shift one hour; revisit the cron in November if needed.
+# Cron is UTC. ET is UTC-4 during EDT (the entire regular season, Sep-early
+# Jan) and UTC-5 during EST (from the Nov DST changeover through the
+# playoffs/Super Bowl). The times below are set for EDT; revisit in November
+# when clocks fall back, same caveat as the old MLB workflow had.
+#   tuesday_grade     11:00 UTC = 07:00 EDT  (grades the just-finished week)
+#   tuesday_research   12:00 UTC = 08:00 EDT  (pulls the upcoming week's slate)
+#   thursday_lock     21:00 UTC = 17:00 EDT  (before ~20:15 ET TNF kickoff)
+#   sunday_lock       14:00 UTC = 10:00 ET   (rulebook: "Sunday, 10:00 AM ET")
+#   monday_lock       18:00 UTC = 14:00 EDT  (Monday afternoon lock)
 
 on:
   workflow_dispatch:
     inputs:
       slot:
-        description: "Slot to run (morning | midday | pregame | closing)"
+        description: "Slot to run"
         required: true
-        default: midday
+        default: tuesday_research
         type: choice
-        options: [morning, midday, pregame, closing]
+        options: [tuesday_research, thursday_lock, sunday_lock, monday_lock, tuesday_grade]
   schedule:
-    - cron: "0 11 * * *"   # morning  — 07:00 EDT
-    - cron: "0 16 * * *"   # midday   — 12:00 EDT
-    - cron: "0 21 * * *"   # pregame  — 17:00 EDT
-    - cron: "0 3 * * *"    # closing  — 23:00 EDT (prev ET day)
+    - cron: "0 11 * * 2"   # tuesday_grade
+    - cron: "0 12 * * 2"   # tuesday_research
+    - cron: "0 21 * * 4"   # thursday_lock
+    - cron: "0 14 * * 0"   # sunday_lock
+    - cron: "0 18 * * 1"   # monday_lock
 
 concurrency:
   # Never let two slots run against the same Postgres DB at once.
-  group: mlb-pulls
+  group: nfl-pulls
   cancel-in-progress: false
 
 jobs:
@@ -39,8 +46,9 @@ jobs:
       DB_BACKEND: postgres
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-      ALGO1_DISCORD_WEBHOOK: ${{ secrets.ALGO1_DISCORD_WEBHOOK }}
-      ALGO2_DISCORD_WEBHOOK: ${{ secrets.ALGO2_DISCORD_WEBHOOK }}
+      COACH_BO_DISCORD_WEBHOOK: ${{ secrets.COACH_BO_DISCORD_WEBHOOK }}
+      ACCOUNTANT_DISCORD_WEBHOOK: ${{ secrets.ACCOUNTANT_DISCORD_WEBHOOK }}
+      DARREN_DISCORD_WEBHOOK: ${{ secrets.DARREN_DISCORD_WEBHOOK }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,12 +71,13 @@ jobs:
             echo "name=${{ github.event.inputs.slot }}" >> "$GITHUB_OUTPUT"
           else
             case "${{ github.event.schedule }}" in
-              "0 11 * * *") echo "name=morning" >> "$GITHUB_OUTPUT" ;;
-              "0 16 * * *") echo "name=midday"  >> "$GITHUB_OUTPUT" ;;
-              "0 21 * * *") echo "name=pregame" >> "$GITHUB_OUTPUT" ;;
-              "0 3 * * *")  echo "name=closing" >> "$GITHUB_OUTPUT" ;;
+              "0 11 * * 2") echo "name=tuesday_grade"    >> "$GITHUB_OUTPUT" ;;
+              "0 12 * * 2") echo "name=tuesday_research" >> "$GITHUB_OUTPUT" ;;
+              "0 21 * * 4") echo "name=thursday_lock"    >> "$GITHUB_OUTPUT" ;;
+              "0 14 * * 0") echo "name=sunday_lock"      >> "$GITHUB_OUTPUT" ;;
+              "0 18 * * 1") echo "name=monday_lock"      >> "$GITHUB_OUTPUT" ;;
             esac
           fi
 
       - name: Run orchestrator slot
-        run: python scripts/run_scheduled_pull.py ${{ steps.slot.outputs.name }}
+        run: python scripts/run_slot.py ${{ steps.slot.outputs.name }}
