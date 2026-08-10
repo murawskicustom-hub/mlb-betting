@@ -386,22 +386,34 @@ def init_db():
         # bets — manually-placed bets, optionally linked to a recommendation
         conn.execute("""
             CREATE TABLE IF NOT EXISTS bets (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                sport           TEXT NOT NULL,
-                game_id         TEXT,
-                market          TEXT,
-                side            TEXT,
-                line            REAL,
-                price_american  INTEGER,
-                units           REAL,
-                placed_at_utc   TEXT,
-                result          TEXT,
-                unit_profit     REAL,
-                notes           TEXT
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                sport                   TEXT NOT NULL,
+                game_id                 TEXT,
+                book                    TEXT,
+                market                  TEXT,
+                side                    TEXT,
+                line                    REAL,
+                price_american          INTEGER,
+                units                   REAL,
+                placed_at_utc           TEXT,
+                recommendation_id       INTEGER,
+                closing_price_american  INTEGER,
+                clv_percent             REAL,
+                result                  TEXT,
+                unit_profit             REAL,
+                graded_at_utc           TEXT,
+                notes                   TEXT
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bet_game   ON bets (game_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bet_result ON bets (result)")
+
+        # migration-safe: added after the initial bets table (see clv_calculator.py)
+        _add_col(conn, 'bets', 'book',                    'TEXT')
+        _add_col(conn, 'bets', 'recommendation_id',        'INTEGER')
+        _add_col(conn, 'bets', 'closing_price_american',   'INTEGER')
+        _add_col(conn, 'bets', 'clv_percent',              'REAL')
+        _add_col(conn, 'bets', 'graded_at_utc',             'TEXT')
 
         # results — generic box score; sport-specific detail goes in detail_json
         conn.execute("""

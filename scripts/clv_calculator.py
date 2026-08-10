@@ -1,28 +1,25 @@
 """
 clv_calculator.py — fills in closing_price_american and clv_percent for
-recommendations and personal bets once a game has reached first pitch.
+recommendations and bets once a game has reached kickoff.
 
 Call compute_clv(conn) with an open database connection.
 Safe to run repeatedly: only touches rows where closing_price_american IS NULL.
+Fade rows (is_fade=1) are skipped — they have no side/price to compare.
 """
 
-from datetime import datetime, timezone
 from logger import get_logger
 
 log = get_logger('clv')
 
-# Statuses that indicate the game has reached or passed first pitch
-STARTED_STATUSES = ('In Progress', 'Final', 'Completed Early',
-                    'Postponed', 'Cancelled', 'Suspended')
+# ESPN status names that mean the game has reached or passed kickoff.
+STARTED_STATUSES = (
+    'STATUS_IN_PROGRESS', 'STATUS_HALFTIME', 'STATUS_END_PERIOD',
+    'STATUS_FINAL', 'STATUS_FINAL_OVERTIME',
+    'STATUS_POSTPONED', 'STATUS_CANCELED', 'STATUS_SUSPENDED',
+)
 
 # Closing-line book priority order
 BOOK_PRIORITY = ('draftkings', 'fanduel', 'betmgm')
-
-# Unused after fix — CLV now uses the most recent snapshot at or before first pitch
-# (old 30-min window was structurally unreachable with a 5pm pregame / 11pm closing cadence)
-# CLOSING_WINDOW_MINUTES = 30
-
-F5_MARKETS = {'f5_moneyline', 'f5_total'}
 
 
 def american_to_decimal(american: int) -> float:
@@ -32,51 +29,41 @@ def american_to_decimal(american: int) -> float:
         return (100 / abs(american)) + 1
 
 
-def find_closing_snapshot(conn, game_pk: int, market: str, outcome_type: str,
-                          game_datetime_utc: str) -> tuple[int | None, str | None]:
+def find_closing_snapshot(conn, game_id: str, market: str, outcome_type: str,
+                          start_utc: str) -> tuple[int | None, str | None]:
     """
     Find the most-recent odds snapshot for this (game, market, outcome_type)
-    at or before first pitch — i.e., the last odds we captured before the game
-    started, regardless of how far in advance the pull ran.
-
-    A strict pre-pitch window (e.g. 30 min) is unreachable with our pull cadence
-    (pregame at 5pm ET, closing at 11pm ET); games start 7-10pm ET, so the closest
-    pregame pull is always 2+ hours before first pitch and the closing pull is always
-    after first pitch. Using the last-snapshot-before-pitch is the correct semantic
-    for "closing line" in this context.
-
-    Priority: DraftKings → FanDuel → BetMGM → any book.
-    Returns (price_american, book_key) or (None, None) if no snapshot found.
+    at or before kickoff — the last odds captured before the game started,
+    regardless of how far in advance the pull ran. Priority: DraftKings ->
+    FanDuel -> BetMGM -> any book. Returns (price_american, book_key) or
+    (None, None) if no snapshot found.
     """
-    window_end = game_datetime_utc  # first pitch is the hard ceiling
+    window_end = start_utc
 
-    # Try priority books first, then fall back to any book
-    books_to_try = list(BOOK_PRIORITY) + [None]   # None = any book
-
-    for book in books_to_try:
+    for book in list(BOOK_PRIORITY) + [None]:
         if book is not None:
             row = conn.execute("""
                 SELECT price_american, book
                 FROM odds_snapshots
-                WHERE game_pk       = ?
+                WHERE game_id       = ?
                   AND market        = ?
                   AND outcome_type  = ?
                   AND book          = ?
                   AND snapshot_time_utc <= ?
                 ORDER BY snapshot_time_utc DESC
                 LIMIT 1
-            """, (game_pk, market, outcome_type, book, window_end)).fetchone()
+            """, (game_id, market, outcome_type, book, window_end)).fetchone()
         else:
             row = conn.execute("""
                 SELECT price_american, book
                 FROM odds_snapshots
-                WHERE game_pk       = ?
+                WHERE game_id       = ?
                   AND market        = ?
                   AND outcome_type  = ?
                   AND snapshot_time_utc <= ?
                 ORDER BY snapshot_time_utc DESC
                 LIMIT 1
-            """, (game_pk, market, outcome_type, window_end)).fetchone()
+            """, (game_id, market, outcome_type, window_end)).fetchone()
 
         if row:
             return row['price_american'], row['book']
@@ -86,7 +73,7 @@ def find_closing_snapshot(conn, game_pk: int, market: str, outcome_type: str,
 
 def compute_clv_pct(our_price: int, closing_price: int) -> float:
     """
-    CLV% = ((our_decimal / closing_decimal) - 1) × 100
+    CLV% = ((our_decimal / closing_decimal) - 1) x 100
     Positive = we beat the close (good). Negative = close was better than us.
     """
     our_dec     = american_to_decimal(our_price)
@@ -106,33 +93,31 @@ def compute_clv(conn) -> dict:
 
     # ── Recommendations ───────────────────────────────────────────────────────
     pending_recs = conn.execute(f"""
-        SELECT r.id, r.game_pk, r.market, r.side, r.target_price_american,
-               g.game_datetime_utc, g.status
+        SELECT r.id, r.game_id, r.market, r.side, r.target_price_american,
+               g.start_utc, g.status
         FROM recommendations r
-        JOIN games g ON g.game_pk = r.game_pk
+        JOIN games g ON g.game_id = r.game_id
         WHERE r.closing_price_american IS NULL
+          AND r.is_fade = 0
           AND g.status IN ({','.join('?'*len(STARTED_STATUSES))})
     """, STARTED_STATUSES).fetchall()
 
     log.info(f'CLV: {len(pending_recs)} recommendation(s) need closing line')
 
     for row in pending_recs:
-        if row['market'] in F5_MARKETS:
-            log.warning(
-                f'rec id={row["id"]}: F5 market — no F5 odds in snapshots, skipping CLV'
-            )
+        if row['target_price_american'] is None:
+            log.debug(f'rec id={row["id"]}: no target_price_american — cannot compute CLV, skipped')
             rec_skipped += 1
             continue
 
         closing_price, closing_book = find_closing_snapshot(
-            conn, row['game_pk'], row['market'], row['side'],
-            row['game_datetime_utc']
+            conn, row['game_id'], row['market'], row['side'], row['start_utc']
         )
 
         if closing_price is None:
             log.debug(
-                f'rec id={row["id"]} game_pk={row["game_pk"]} {row["market"]}/{row["side"]}: '
-                f'no closing snapshot found before first pitch'
+                f'rec id={row["id"]} game_id={row["game_id"]} {row["market"]}/{row["side"]}: '
+                f'no closing snapshot found before kickoff'
             )
             rec_skipped += 1
             continue
@@ -145,54 +130,53 @@ def compute_clv(conn) -> dict:
         """, (closing_price, clv, row['id']))
 
         log.info(
-            f'rec id={row["id"]} game_pk={row["game_pk"]} {row["market"]}/{row["side"]}: '
+            f'rec id={row["id"]} game_id={row["game_id"]} {row["market"]}/{row["side"]}: '
             f'closing={closing_price} (via {closing_book}), '
             f'target={row["target_price_american"]}, CLV={clv:+.2f}%'
         )
         rec_filled += 1
 
-    # ── Personal bets ─────────────────────────────────────────────────────────
+    # ── Bets ───────────────────────────────────────────────────────────────────
     pending_bets = conn.execute(f"""
-        SELECT b.id, b.game_pk, b.market, b.side, b.actual_price_american,
-               g.game_datetime_utc, g.status
-        FROM personal_bets b
-        JOIN games g ON g.game_pk = b.game_pk
+        SELECT b.id, b.game_id, b.market, b.side, b.price_american,
+               g.start_utc, g.status
+        FROM bets b
+        JOIN games g ON g.game_id = b.game_id
         WHERE b.closing_price_american IS NULL
           AND g.status IN ({','.join('?'*len(STARTED_STATUSES))})
     """, STARTED_STATUSES).fetchall()
 
-    log.info(f'CLV: {len(pending_bets)} personal bet(s) need closing line')
+    log.info(f'CLV: {len(pending_bets)} bet(s) need closing line')
 
     for row in pending_bets:
-        if row['market'] in F5_MARKETS:
-            log.warning(f'bet id={row["id"]}: F5 market — skipping CLV')
+        if row['price_american'] is None:
+            log.debug(f'bet id={row["id"]}: no price_american — cannot compute CLV, skipped')
             bet_skipped += 1
             continue
 
         closing_price, closing_book = find_closing_snapshot(
-            conn, row['game_pk'], row['market'], row['side'],
-            row['game_datetime_utc']
+            conn, row['game_id'], row['market'], row['side'], row['start_utc']
         )
 
         if closing_price is None:
             log.debug(
-                f'bet id={row["id"]} game_pk={row["game_pk"]} {row["market"]}/{row["side"]}: '
+                f'bet id={row["id"]} game_id={row["game_id"]} {row["market"]}/{row["side"]}: '
                 f'no closing snapshot in window'
             )
             bet_skipped += 1
             continue
 
-        clv = compute_clv_pct(row['actual_price_american'], closing_price)
+        clv = compute_clv_pct(row['price_american'], closing_price)
         conn.execute("""
-            UPDATE personal_bets
+            UPDATE bets
             SET closing_price_american = ?, clv_percent = ?
             WHERE id = ?
         """, (closing_price, clv, row['id']))
 
         log.info(
-            f'bet id={row["id"]} game_pk={row["game_pk"]} {row["market"]}/{row["side"]}: '
+            f'bet id={row["id"]} game_id={row["game_id"]} {row["market"]}/{row["side"]}: '
             f'closing={closing_price} (via {closing_book}), '
-            f'actual={row["actual_price_american"]}, CLV={clv:+.2f}%'
+            f'price={row["price_american"]}, CLV={clv:+.2f}%'
         )
         bet_filled += 1
 
@@ -202,8 +186,8 @@ def compute_clv(conn) -> dict:
     )
 
     return {
-        'rec_filled':   rec_filled,
-        'rec_skipped':  rec_skipped,
-        'bet_filled':   bet_filled,
-        'bet_skipped':  bet_skipped,
+        'rec_filled':  rec_filled,
+        'rec_skipped': rec_skipped,
+        'bet_filled':  bet_filled,
+        'bet_skipped': bet_skipped,
     }

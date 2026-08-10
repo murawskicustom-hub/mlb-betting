@@ -16,13 +16,32 @@ import argparse
 from datetime import datetime, timezone
 
 import requests
+import pytz
 
 from database import init_db, get_connection
 from logger import get_logger
 
 SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'
+EASTERN = pytz.timezone('US/Eastern')
 
 log = get_logger('pull_schedule_nfl')
+
+
+def utc_str_to_eastern_date(utc_str: str) -> str | None:
+    """
+    Convert an ISO UTC datetime string ('YYYY-MM-DDTHH:MMZ') to a date string
+    in US/Eastern ('YYYY-MM-DD'). NFL night games (e.g. TNF at 8:20pm ET) land
+    after midnight UTC, so truncating the UTC string would misdate them to the
+    next calendar day — this is what the weekly orchestrator's day-of-week
+    slot filters (thursday_lock/sunday_lock/monday_lock) key off of.
+    """
+    if not utc_str:
+        return None
+    try:
+        dt_utc = datetime.strptime(utc_str, '%Y-%m-%dT%H:%MZ').replace(tzinfo=timezone.utc)
+    except ValueError:
+        dt_utc = datetime.strptime(utc_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    return dt_utc.astimezone(EASTERN).strftime('%Y-%m-%d')
 
 
 def fetch_week(season: int, week: int, seasontype: int = 2):
@@ -49,7 +68,7 @@ def parse_event(event: dict, season: int, week: int) -> dict | None:
 
     status_type = comp.get('status', {}).get('type', {})
     game_date_utc = event.get('date', '')
-    game_date = game_date_utc[:10] if game_date_utc else None
+    game_date = utc_str_to_eastern_date(game_date_utc)
 
     def _score(c):
         try:

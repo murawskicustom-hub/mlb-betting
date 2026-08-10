@@ -1,34 +1,29 @@
 """
-grader.py — grades pending recommendations and personal bets.
+grader.py — grades pending recommendations and bets.
 
 Call grade_pending(conn) with an open database connection.
-Safe to run repeatedly: only touches rows where result IS NULL.
+Safe to run repeatedly: only touches rows where result IS NULL and is_fade=0
+(fades are never graded — they never had a side/units to win or lose).
+
+Sport-agnostic: moneyline/total/spread grading works unchanged for any sport
+that reports home_score/away_score. NFL games (and results.detail_json) will
+carry a status string sourced from ESPN (STATUS_FINAL, STATUS_POSTPONED,
+etc.) rather than MLB's Stats API detailedState strings — this module keys
+off those ESPN status names.
 """
 
 from datetime import datetime, timezone
 from logger import get_logger
-from devig import stake_units, unit_payout
+from devig import unit_payout
 
 log = get_logger('grader')
 
-# Statuses that mean the game was cancelled before it became official
-VOID_STATUSES   = {'Postponed', 'Cancelled', 'Suspended'}
-GRADED_STATUSES = {'Final', 'Completed Early'}
-F5_MARKETS      = {'f5_moneyline', 'f5_total'}
-LINESCORE_MARKETS = {'f5_moneyline', 'f5_total', 'yrfi', 'nrfi'}
+VOID_STATUSES = {'STATUS_POSTPONED', 'STATUS_CANCELED', 'STATUS_SUSPENDED'}
 
 
-# ── Linescore helper ─────────────────────────────────────────────────────────
-
-def _get_linescore(conn, game_pk: int) -> dict | None:
-    """Fetch linescore row for a game. Returns None if not available."""
-    try:
-        row = conn.execute(
-            'SELECT * FROM linescores WHERE game_pk = ?', (game_pk,)
-        ).fetchone()
-        return dict(row) if row else None
-    except Exception:
-        return None
+def _is_final(status: str) -> bool:
+    # ESPN uses STATUS_FINAL for both regulation and overtime finishes.
+    return bool(status) and status.startswith('STATUS_FINAL')
 
 
 # ── Payout helper ──────────────────────────────────────────────────────────────
@@ -42,7 +37,6 @@ def payout_at_stake_1(result: str, price_american: int) -> float:
         return 0.0
     if result in ('push', 'void'):
         return 1.0
-    # win
     p = price_american
     if p >= 0:
         return round((p / 100) + 1, 6)
@@ -53,11 +47,12 @@ def payout_at_stake_1(result: str, price_american: int) -> float:
 # ── Grading logic ─────────────────────────────────────────────────────────────
 
 def grade_moneyline(side: str, home_score: int, away_score: int) -> str:
+    if home_score == away_score:
+        return 'push'   # ties are possible in the NFL regular season
     if side == 'home':
         return 'win' if home_score > away_score else 'loss'
     else:
         return 'win' if away_score > home_score else 'loss'
-    # MLB has no ties (extra innings), so push is not possible here
 
 
 def grade_total(side: str, line: float, home_score: int, away_score: int) -> str:
@@ -93,17 +88,18 @@ def grade_spread(side: str, line: float, home_score: int, away_score: int) -> st
 def compute_result(market: str, side: str, line, home_score: int, away_score: int,
                    game_status: str) -> str | None:
     """
-    Returns result string, or None if the row should be skipped (F5, or
-    game not yet in a gradeable state).
+    Returns result string, or None if the row should be skipped (game not yet
+    in a gradeable state, or an unknown market).
     """
     if game_status in VOID_STATUSES:
         return 'void'
 
-    if game_status not in GRADED_STATUSES:
+    if not _is_final(game_status):
         return None   # game not finished
 
-    if market in F5_MARKETS:
-        return None   # F5: caller logs warning and skips
+    if market in ('total', 'spread') and line is None:
+        log.warning(f'{market} pick has no line — cannot grade, skipped')
+        return None
 
     if market == 'moneyline':
         return grade_moneyline(side, home_score, away_score)
@@ -120,168 +116,82 @@ def compute_result(market: str, side: str, line, home_score: int, away_score: in
 
 def grade_pending(conn) -> dict:
     """
-    Grade all ungraded recommendations and personal bets whose game is finished.
+    Grade all ungraded recommendations and bets whose game is finished.
+    Fade rows (is_fade=1) are never included — they carry no side/units.
     Returns a summary dict.
     """
     now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
-    rec_counts  = {'win': 0, 'loss': 0, 'push': 0, 'void': 0}
-    bet_count   = 0
-    rec_graded  = 0
+    rec_counts = {'win': 0, 'loss': 0, 'push': 0, 'void': 0}
+    bet_count  = 0
+    rec_graded = 0
 
     # ── Grade recommendations ─────────────────────────────────────────────────
     pending_recs = conn.execute("""
-        SELECT r.id, r.game_pk, r.market, r.side, r.line, r.target_price_american,
-               r.recommended_stake_pct,
+        SELECT r.id, r.game_id, r.market, r.side, r.line, r.target_price_american, r.units,
                g.status, g.home_score, g.away_score
         FROM recommendations r
-        JOIN games g ON g.game_pk = r.game_pk
-        WHERE r.result IS NULL
+        JOIN games g ON g.game_id = r.game_id
+        WHERE r.result IS NULL AND r.is_fade = 0
     """).fetchall()
 
     log.info(f'Grader: {len(pending_recs)} ungraded recommendation(s) found')
 
     for row in pending_recs:
-        market = row['market']
         status = row['status']
+        if status not in VOID_STATUSES and not _is_final(status):
+            continue  # game not finished
 
-        # ── Linescore-based markets: F5 / YRFI / NRFI ────────────────────────
-        if market in LINESCORE_MARKETS:
-            if status in VOID_STATUSES:
-                result = 'void'
-            elif status not in GRADED_STATUSES:
-                continue  # game not finished
-            else:
-                ls = _get_linescore(conn, row['game_pk'])
-                if ls is None:
-                    continue  # no linescore data yet
+        result = compute_result(
+            row['market'], row['side'], row['line'],
+            row['home_score'], row['away_score'], status
+        )
+        if result is None:
+            continue
 
-                if market in ('yrfi', 'nrfi'):
-                    if ls['yrfi'] is None:
-                        continue
-                    scored = (ls['yrfi'] == 1)
-                    result = 'win' if (scored == (market == 'yrfi')) else 'loss'
-
-                elif market == 'f5_moneyline':
-                    if ls['home_f5_runs'] is None or ls['away_f5_runs'] is None:
-                        continue  # game shorter than 5 innings
-                    f5hw = ls['f5_home_win']  # 1=home, 0=away, NULL=tie
-                    if f5hw is None:
-                        result = 'push'
-                    elif row['side'] == 'home':
-                        result = 'win' if f5hw == 1 else 'loss'
-                    else:
-                        result = 'win' if f5hw == 0 else 'loss'
-
-                else:  # f5_total
-                    if ls['f5_total_runs'] is None:
-                        continue
-                    if row['line'] is None:
-                        continue
-                    total = ls['f5_total_runs']
-                    line  = row['line']
-                    if row['side'] == 'over':
-                        result = 'win' if total > line else ('push' if total == line else 'loss')
-                    else:
-                        result = 'win' if total < line else ('push' if total == line else 'loss')
-
-        # ── Full-game markets ─────────────────────────────────────────────────
-        else:
-            if status not in GRADED_STATUSES | VOID_STATUSES:
-                continue   # game not finished
-
-            result = compute_result(
-                market, row['side'], row['line'],
-                row['home_score'], row['away_score'], status
-            )
-            if result is None:
-                continue
-
-        payout   = payout_at_stake_1(result, row['target_price_american'])
-        u_stake  = stake_units(row['recommended_stake_pct'])
-        u_profit = unit_payout(result, row['target_price_american'], u_stake)
+        units    = row['units'] or 0.0
+        u_profit = unit_payout(result, row['target_price_american'], units)
 
         conn.execute("""
             UPDATE recommendations
-            SET result = ?, result_payout_at_stake_1 = ?, unit_profit = ?, graded_at_utc = ?
+            SET result = ?, unit_profit = ?, graded_at_utc = ?
             WHERE id = ?
-        """, (result, payout, u_profit, now_utc, row['id']))
+        """, (result, u_profit, now_utc, row['id']))
 
         rec_counts[result] = rec_counts.get(result, 0) + 1
         rec_graded += 1
 
-    # ── Grade personal bets ───────────────────────────────────────────────────
+    # ── Grade bets ─────────────────────────────────────────────────────────────
     pending_bets = conn.execute("""
-        SELECT b.id, b.game_pk, b.market, b.side, b.line, b.actual_price_american,
-               b.stake_dollars,
+        SELECT b.id, b.game_id, b.market, b.side, b.line, b.price_american, b.units,
                g.status, g.home_score, g.away_score
-        FROM personal_bets b
-        JOIN games g ON g.game_pk = b.game_pk
+        FROM bets b
+        JOIN games g ON g.game_id = b.game_id
         WHERE b.result IS NULL
     """).fetchall()
 
-    log.info(f'Grader: {len(pending_bets)} ungraded personal bet(s) found')
+    log.info(f'Grader: {len(pending_bets)} ungraded bet(s) found')
 
     for row in pending_bets:
-        market = row['market']
         status = row['status']
+        if status not in VOID_STATUSES and not _is_final(status):
+            continue
 
-        if market in LINESCORE_MARKETS:
-            if status in VOID_STATUSES:
-                result = 'void'
-            elif status not in GRADED_STATUSES:
-                continue
-            else:
-                ls = _get_linescore(conn, row['game_pk'])
-                if ls is None:
-                    continue
-                if market in ('yrfi', 'nrfi'):
-                    if ls['yrfi'] is None:
-                        continue
-                    scored = (ls['yrfi'] == 1)
-                    result = 'win' if (scored == (market == 'yrfi')) else 'loss'
-                elif market == 'f5_moneyline':
-                    if ls['home_f5_runs'] is None or ls['away_f5_runs'] is None:
-                        continue
-                    f5hw = ls['f5_home_win']
-                    if f5hw is None:
-                        result = 'push'
-                    elif row['side'] == 'home':
-                        result = 'win' if f5hw == 1 else 'loss'
-                    else:
-                        result = 'win' if f5hw == 0 else 'loss'
-                else:  # f5_total
-                    if ls['f5_total_runs'] is None or row['line'] is None:
-                        continue
-                    total = ls['f5_total_runs']
-                    line  = row['line']
-                    if row['side'] == 'over':
-                        result = 'win' if total > line else ('push' if total == line else 'loss')
-                    else:
-                        result = 'win' if total < line else ('push' if total == line else 'loss')
-        else:
-            if status not in GRADED_STATUSES | VOID_STATUSES:
-                continue
-            result = compute_result(
-                market, row['side'], row['line'],
-                row['home_score'], row['away_score'], status
-            )
-            if result is None:
-                continue
+        result = compute_result(
+            row['market'], row['side'], row['line'],
+            row['home_score'], row['away_score'], status
+        )
+        if result is None:
+            continue
 
-        payout_per_1 = payout_at_stake_1(result, row['actual_price_american'])
-        stake        = row['stake_dollars']
-        payout       = round(stake * payout_per_1, 2)
-        pl           = round(payout - stake, 2)
-        unit_s       = round(stake / 25.0, 4)   # 1 unit = 1% of $2500 = $25
-        u_pl         = round(pl   / 25.0, 4)
+        units    = row['units'] or 0.0
+        u_profit = unit_payout(result, row['price_american'], units)
 
         conn.execute("""
-            UPDATE personal_bets
-            SET result = ?, payout_dollars = ?, profit_loss_dollars = ?,
-                unit_stake = ?, unit_profit = ?, graded_at_utc = ?
+            UPDATE bets
+            SET result = ?, unit_profit = ?, graded_at_utc = ?
             WHERE id = ?
-        """, (result, payout, pl, unit_s, u_pl, now_utc, row['id']))
+        """, (result, u_profit, now_utc, row['id']))
 
         bet_count += 1
 
@@ -290,7 +200,7 @@ def grade_pending(conn) -> dict:
         f'Grader done: recommendations graded={rec_graded} '
         f'(W={rec_counts["win"]} L={rec_counts["loss"]} '
         f'P={rec_counts.get("push",0)} V={rec_counts.get("void",0)}), '
-        f'personal bets graded={bet_count}'
+        f'bets graded={bet_count}'
     )
 
     return {
