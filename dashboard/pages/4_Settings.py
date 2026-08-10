@@ -11,7 +11,7 @@ import streamlit as st
 import pandas as pd
 
 from database import get_connection, init_db
-from components.auth import require_login
+from components.auth import require_login, require_admin
 from settings import get_setting, set_setting
 from components.metrics import data_status, BOT_DISPLAY_NAMES
 from components.styles import inject_custom_css, section_head, page_header
@@ -22,6 +22,7 @@ st.set_page_config(page_title='Settings — 3 Bettors', page_icon='⚙️', layo
                    initial_sidebar_state='expanded')
 inject_custom_css()
 require_login()   # password gate — nothing below renders until authenticated
+require_admin()   # admin-only: season/week control + data health are admin-level actions
 init_db()
 
 page_header('SETTINGS', 'Season, bots & data health')

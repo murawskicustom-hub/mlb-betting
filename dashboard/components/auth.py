@@ -88,3 +88,53 @@ def require_login():
     # If we reach here the user is not authenticated (wrong password or first
     # load). Halt so nothing below this call renders.
     st.stop()
+
+
+def _expected_admin_password():
+    try:
+        pw = st.secrets['ADMIN_PASSWORD']
+    except Exception:
+        return None
+    return pw if pw else None
+
+
+def _render_admin_gate():
+    expected = _expected_admin_password()
+    if not expected:
+        st.error(
+            'ADMIN_PASSWORD is not configured. Set it in Streamlit Cloud → '
+            'Manage app → Settings → Secrets (or in .streamlit/secrets.toml '
+            'locally), then reload.'
+        )
+        st.stop()
+
+    left, mid, right = st.columns([1, 1.3, 1])
+    with mid:
+        st.markdown(
+            "<div style='text-align:center;margin-top:14vh'>"
+            "<div style='font-size:32px;font-weight:800;letter-spacing:-1px'>🔒 Admin only</div>"
+            "<div style='color:#8b8b8b;margin:6px 0 18px;font-size:14px'>"
+            "This page is restricted — enter the admin password</div></div>",
+            unsafe_allow_html=True,
+        )
+        with st.form('admin_login_form', clear_on_submit=False):
+            pw = st.text_input('Admin password', type='password',
+                               label_visibility='collapsed', placeholder='Admin password')
+            submitted = st.form_submit_button('Unlock', use_container_width=True)
+
+        if submitted:
+            if hmac.compare_digest(pw.encode('utf-8'), expected.encode('utf-8')):
+                st.session_state['is_admin'] = True
+                st.rerun()
+            else:
+                st.error('Incorrect admin password.')
+
+
+def require_admin():
+    """Gate an admin-only page. Call AFTER require_login(). Returns only once
+    the admin password has been entered this session; otherwise st.stop()s."""
+    if st.session_state.get('is_admin') is True:
+        return
+
+    _render_admin_gate()
+    st.stop()

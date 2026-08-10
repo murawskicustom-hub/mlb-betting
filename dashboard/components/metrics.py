@@ -19,6 +19,13 @@ BOT_DISPLAY_NAMES = {
     'degen_darren':   'Degen Darren',
 }
 
+# Admin isn't a registered bot — there's no bot_key on any recommendations row
+# for it. It's a virtual competitor computed from the bets table (the human's
+# manually-logged personal bets), so it can stand shoulder-to-shoulder with
+# the 3 bots in the standings without needing a 4th synthetic bot_key.
+ADMIN_KEY = 'admin'
+ADMIN_DISPLAY_NAME = 'Admin (You)'
+
 
 def _today_et() -> str:
     return datetime.now(EASTERN).strftime('%Y-%m-%d')
@@ -41,8 +48,9 @@ def current_season_week(conn, sport: str = 'nfl') -> tuple[int, int]:
 # ── Season standings — the 3-way competition ────────────────────────────────────
 
 def season_standings(conn, sport: str) -> list[dict]:
-    """Units-based standings for every registered bot, ordered by total units.
-    Bots with no graded picks yet still appear, at 0."""
+    """Units-based standings for every registered bot PLUS Admin (the human
+    competitor, computed from the bets table), ordered by total units.
+    Anyone with no graded picks yet still appears, at 0."""
     rows = conn.execute("""
         SELECT bot_key,
                COUNT(*) as graded,
@@ -70,12 +78,36 @@ def season_standings(conn, sport: str) -> list[dict]:
             'total_units':  round(r['total_units'] or 0.0, 2) if r else 0.0,
             'avg_clv':      r['avg_clv'] if r else None,
         })
+
+    admin_row = conn.execute("""
+        SELECT COUNT(*) as graded,
+               SUM(CASE WHEN result='win'  THEN 1 ELSE 0 END) as wins,
+               SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) as losses,
+               SUM(CASE WHEN result IN ('push','void') THEN 1 ELSE 0 END) as pushes,
+               COALESCE(SUM(unit_profit), 0) as total_units,
+               AVG(clv_percent) as avg_clv
+        FROM bets
+        WHERE sport = ? AND result IS NOT NULL
+    """, (sport,)).fetchone()
+    out.append({
+        'bot_key':      ADMIN_KEY,
+        'display_name': ADMIN_DISPLAY_NAME,
+        'graded':       admin_row['graded'] or 0,
+        'wins':         admin_row['wins'] or 0,
+        'losses':       admin_row['losses'] or 0,
+        'pushes':       admin_row['pushes'] or 0,
+        'total_units':  round(admin_row['total_units'] or 0.0, 2),
+        'avg_clv':      admin_row['avg_clv'],
+    })
+
     out.sort(key=lambda x: x['total_units'], reverse=True)
     return out
 
 
 def current_week_pick_counts(conn, sport: str, season: int, week: int) -> list[dict]:
-    """Picks vs fades per bot for the given week, for every registered bot."""
+    """Picks vs fades per bot for the given week, for every registered bot,
+    plus Admin (picks = distinct games bet on; fades = slate games with no bet,
+    mirroring the bots' fade semantics so the comparison stays apples-to-apples)."""
     rows = conn.execute("""
         SELECT r.bot_key,
                SUM(CASE WHEN r.is_fade = 0 THEN 1 ELSE 0 END) as picks,
@@ -96,6 +128,22 @@ def current_week_pick_counts(conn, sport: str, season: int, week: int) -> list[d
             'picks':        r['picks'] if r else 0,
             'fades':        r['fades'] if r else 0,
         })
+
+    total_games = conn.execute(
+        'SELECT COUNT(*) FROM games WHERE sport = ? AND season = ? AND week = ?',
+        (sport, season, week),
+    ).fetchone()[0]
+    admin_games_bet = conn.execute("""
+        SELECT COUNT(DISTINCT b.game_id) FROM bets b
+        JOIN games g ON g.game_id = b.game_id
+        WHERE b.sport = ? AND g.season = ? AND g.week = ?
+    """, (sport, season, week)).fetchone()[0]
+    out.append({
+        'bot_key':      ADMIN_KEY,
+        'display_name': ADMIN_DISPLAY_NAME,
+        'picks':        admin_games_bet,
+        'fades':        max(total_games - admin_games_bet, 0),
+    })
     return out
 
 
@@ -217,6 +265,109 @@ def pick_ledger(conn, sport: str, bot_key: str, start_date: str = None, end_date
         WHERE r.sport = ? AND r.bot_key = ?
           {date_clauses}
         ORDER BY g.game_date DESC, r.id DESC
+    """, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Admin (the human competitor) — mirrors the bot_* functions above but is
+# sourced from the bets table instead of recommendations, since Admin's
+# "picks" are whatever they log manually on My Bets. ────────────────────────
+
+def admin_summary(conn, sport: str) -> dict:
+    """Headline P/L, win rate, avg CLV, ROI for Admin's graded bets."""
+    row = conn.execute("""
+        SELECT COUNT(*) as graded,
+               SUM(CASE WHEN result='win'  THEN 1 ELSE 0 END) as wins,
+               SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) as losses,
+               SUM(CASE WHEN result IN ('push','void') THEN 1 ELSE 0 END) as pushes,
+               COALESCE(SUM(unit_profit), 0) as total_units,
+               COALESCE(SUM(units), 0) as total_staked,
+               AVG(clv_percent) as avg_clv
+        FROM bets
+        WHERE sport = ? AND result IS NOT NULL
+    """, (sport,)).fetchone()
+
+    total_units  = row['total_units'] or 0.0
+    total_staked = row['total_staked'] or 0.0
+    roi = round(total_units / total_staked * 100, 1) if total_staked > 0 else None
+
+    return {
+        'graded':       row['graded'] or 0,
+        'wins':         row['wins'] or 0,
+        'losses':       row['losses'] or 0,
+        'pushes':       row['pushes'] or 0,
+        'total_units':  round(total_units, 2),
+        'avg_clv':      row['avg_clv'],
+        'roi_pct':      roi,
+        'total_staked': round(total_staked, 1),
+    }
+
+
+def admin_breakdown(conn, sport: str, group_col: str) -> list[dict]:
+    """Breakdown table: units P/L, win rate, avg CLV by group (market, ...) for Admin."""
+    rows = conn.execute(f"""
+        SELECT {group_col} as group_key,
+               COUNT(*) as picks,
+               SUM(CASE WHEN result='win'  THEN 1 ELSE 0 END) as wins,
+               SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) as losses,
+               SUM(CASE WHEN result IN ('push','void') THEN 1 ELSE 0 END) as pushes,
+               COALESCE(SUM(unit_profit), 0) as unit_profit,
+               COALESCE(SUM(units), 0) as units_staked,
+               AVG(clv_percent) as avg_clv
+        FROM bets
+        WHERE sport = ? AND result IS NOT NULL
+        GROUP BY {group_col}
+        ORDER BY unit_profit DESC
+    """, (sport,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def admin_unit_trend_by_week(conn, sport: str) -> list[dict]:
+    """Cumulative unit P/L per (season, week) for Admin, for the chart."""
+    rows = conn.execute("""
+        SELECT g.season, g.week, SUM(b.unit_profit) as week_units
+        FROM bets b
+        JOIN games g ON g.game_id = b.game_id
+        WHERE b.sport = ? AND b.result IS NOT NULL
+        GROUP BY g.season, g.week
+        ORDER BY g.season, g.week
+    """, (sport,)).fetchall()
+
+    out = []
+    cum = 0.0
+    for r in rows:
+        cum += r['week_units'] or 0
+        out.append({
+            'label':      f"S{r['season']} W{r['week']}",
+            'week_units': round(r['week_units'] or 0, 3),
+            'cum_units':  round(cum, 3),
+        })
+    return out
+
+
+def admin_pick_ledger(conn, sport: str, start_date: str = None, end_date: str = None) -> list[dict]:
+    """One row per bet for Admin, newest first — shaped like pick_ledger() so
+    the Performance page can render both with the same table code."""
+    params = [sport]
+    date_clauses = ''
+    if start_date:
+        date_clauses += ' AND g.game_date >= ?'
+        params.append(start_date)
+    if end_date:
+        date_clauses += ' AND g.game_date <= ?'
+        params.append(end_date)
+
+    rows = conn.execute(f"""
+        SELECT b.id, g.game_date, g.away_team, g.home_team,
+               b.market, b.side, b.line, b.price_american as target_price_american,
+               NULL as fair_price_american, NULL as edge_percent,
+               NULL as confidence, b.units, 0 as is_fade,
+               b.clv_percent, b.result, b.unit_profit
+        FROM bets b
+        JOIN games g ON g.game_id = b.game_id
+        WHERE b.sport = ?
+          {date_clauses}
+        ORDER BY g.game_date DESC, b.id DESC
     """, params).fetchall()
     return [dict(r) for r in rows]
 

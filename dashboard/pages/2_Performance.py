@@ -16,11 +16,12 @@ from database import get_connection, init_db
 from components.auth import require_login
 from components.metrics import (
     season_standings, bot_summary, bot_breakdown, unit_trend_by_week, pick_ledger,
-    BOT_DISPLAY_NAMES,
+    admin_summary, admin_breakdown, admin_unit_trend_by_week, admin_pick_ledger,
+    BOT_DISPLAY_NAMES, ADMIN_KEY, ADMIN_DISPLAY_NAME,
 )
 from components.formatters import fmt_pct
 from components.styles import (
-    inject_custom_css, empty_state, section_head, plotly_dark, page_header, BOT_COLORS,
+    inject_custom_css, empty_state, section_head, plotly_dark, page_header, BOT_COLORS, ADMIN_COLOR,
 )
 
 SPORT = 'nfl'
@@ -39,7 +40,8 @@ _NO_DATA_SUB = 'Populates once picks are graded.'
 
 view = st.radio(
     'VIEW',
-    options=['SEASON STANDINGS'] + [n.upper() for n in BOT_DISPLAY_NAMES.values()],
+    options=(['SEASON STANDINGS'] + [n.upper() for n in BOT_DISPLAY_NAMES.values()]
+             + [ADMIN_DISPLAY_NAME.upper()]),
     horizontal=True,
     label_visibility='visible',
 )
@@ -64,13 +66,20 @@ with get_connection() as conn:
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
-    # ── Per-bot branch ────────────────────────────────────────────────────────
+    # ── Per-bot / Admin branch ────────────────────────────────────────────────
     else:
-        bot_key = next(k for k, v in BOT_DISPLAY_NAMES.items() if v.upper() == view)
-        display_name = BOT_DISPLAY_NAMES[bot_key]
-        accent = BOT_COLORS.get(bot_key, '#8B92A8')
+        is_admin_view = view == ADMIN_DISPLAY_NAME.upper()
 
-        summary = bot_summary(conn, SPORT, bot_key)
+        if is_admin_view:
+            bot_key = ADMIN_KEY
+            display_name = ADMIN_DISPLAY_NAME
+            accent = ADMIN_COLOR
+            summary = admin_summary(conn, SPORT)
+        else:
+            bot_key = next(k for k, v in BOT_DISPLAY_NAMES.items() if v.upper() == view)
+            display_name = BOT_DISPLAY_NAMES[bot_key]
+            accent = BOT_COLORS.get(bot_key, '#8B92A8')
+            summary = bot_summary(conn, SPORT, bot_key)
 
         st.markdown('<br>', unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
@@ -152,17 +161,24 @@ with get_connection() as conn:
                 })
             st.dataframe(pd.DataFrame(table_rows), hide_index=True, use_container_width=True)
 
-        tab1, tab2 = st.tabs(['BY MARKET', 'BY CONFIDENCE'])
-        with tab1:
-            _breakdown_table(bot_breakdown(conn, SPORT, bot_key, 'market'), 'MARKET')
-        with tab2:
-            _breakdown_table(bot_breakdown(conn, SPORT, bot_key, 'confidence'), 'CONFIDENCE')
+        if is_admin_view:
+            tab1, tab2 = st.tabs(['BY MARKET', 'BY BOOK'])
+            with tab1:
+                _breakdown_table(admin_breakdown(conn, SPORT, 'market'), 'MARKET')
+            with tab2:
+                _breakdown_table(admin_breakdown(conn, SPORT, 'book'), 'BOOK')
+        else:
+            tab1, tab2 = st.tabs(['BY MARKET', 'BY CONFIDENCE'])
+            with tab1:
+                _breakdown_table(bot_breakdown(conn, SPORT, bot_key, 'market'), 'MARKET')
+            with tab2:
+                _breakdown_table(bot_breakdown(conn, SPORT, bot_key, 'confidence'), 'CONFIDENCE')
 
         st.markdown('<br>', unsafe_allow_html=True)
 
         # ── Cumulative units chart ─────────────────────────────────────────────
         section_head('CUMULATIVE UNITS P/L BY WEEK')
-        trend = unit_trend_by_week(conn, SPORT, bot_key)
+        trend = admin_unit_trend_by_week(conn, SPORT) if is_admin_view else unit_trend_by_week(conn, SPORT, bot_key)
         if not trend:
             empty_state(_NO_DATA, 'Chart populates once picks are graded.')
         else:
@@ -194,14 +210,21 @@ with get_connection() as conn:
         with fc2:
             ledger_end = st.date_input('To', value=_today, key='ledger_to',
                                        label_visibility='collapsed')
-        with fc3:
-            show_fades = st.checkbox('Include fades', value=False, key='ledger_fades')
+        show_fades = False
+        if not is_admin_view:
+            with fc3:
+                show_fades = st.checkbox('Include fades', value=False, key='ledger_fades')
 
-        raw = pick_ledger(conn, SPORT, bot_key,
-                          start_date=ledger_start.isoformat(),
-                          end_date=ledger_end.isoformat())
-        if not show_fades:
-            raw = [r for r in raw if not r['is_fade']]
+        if is_admin_view:
+            raw = admin_pick_ledger(conn, SPORT,
+                                    start_date=ledger_start.isoformat(),
+                                    end_date=ledger_end.isoformat())
+        else:
+            raw = pick_ledger(conn, SPORT, bot_key,
+                              start_date=ledger_start.isoformat(),
+                              end_date=ledger_end.isoformat())
+            if not show_fades:
+                raw = [r for r in raw if not r['is_fade']]
 
         def _fmt_am(price):
             if price is None: return '—'

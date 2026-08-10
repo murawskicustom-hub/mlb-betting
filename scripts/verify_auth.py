@@ -1,12 +1,15 @@
 """
-verify_auth.py — prove the password gate blocks every page independently.
+verify_auth.py — prove both password gates block every page independently.
 
 Uses Streamlit's AppTest to run each page headlessly and assert:
-  1. With the secret configured but NOT authenticated, EVERY page (incl. deep-
-     linked sub-pages) halts at the login screen and renders no real content.
-  2. A wrong password is rejected and does not authenticate.
-  3. The correct password authenticates and lets the page render.
+  1. With APP_PASSWORD configured but NOT authenticated, EVERY page (incl.
+     deep-linked sub-pages) halts at the login screen and renders no real content.
+  2. A wrong main password is rejected and does not authenticate.
+  3. The correct main password authenticates and lets non-admin pages render.
   4. With APP_PASSWORD missing, the page shows a config error (no default).
+  5. Admin-only pages (My Bets, Settings) stay gated behind a SECOND password
+     (ADMIN_PASSWORD) even after the main login succeeds; non-admin pages do not.
+  6. Wrong/correct/missing ADMIN_PASSWORD behave the same way as the main gate.
 
 Run: python scripts/verify_auth.py   (exits non-zero on any failure)
 """
@@ -22,12 +25,15 @@ from streamlit.testing.v1 import AppTest
 DASH = Path(__file__).resolve().parents[1] / 'dashboard'
 PAGES = [
     ('Home (app.py)', DASH / 'app.py'),
-    ('Today',         DASH / 'pages' / '1_Today.py'),
+    ('This Week',     DASH / 'pages' / '1_This_Week.py'),
     ('Performance',   DASH / 'pages' / '2_Performance.py'),
     ('My Bets',       DASH / 'pages' / '3_My_Bets.py'),
     ('Settings',      DASH / 'pages' / '4_Settings.py'),
 ]
+ADMIN_PAGES = {'My Bets', 'Settings'}
+
 PASSWORD = 'correct horse battery staple'
+ADMIN_PASSWORD = 'admin horse battery staple'
 
 failures = []
 
@@ -37,8 +43,17 @@ def _authed(at):
             and at.session_state['authenticated'] is True)
 
 
+def _is_admin(at):
+    return ('is_admin' in at.session_state
+            and at.session_state['is_admin'] is True)
+
+
 def _login_shown(at):
     return any('Enter password to continue' in (m.value or '') for m in at.markdown)
+
+
+def _admin_gate_shown(at):
+    return any('Admin only' in (m.value or '') for m in at.markdown)
 
 
 def check(name, cond):
@@ -52,6 +67,7 @@ print('--- (1) every page gated when NOT authenticated ---')
 for label, path in PAGES:
     at = AppTest.from_file(str(path), default_timeout=30)
     at.secrets['APP_PASSWORD'] = PASSWORD
+    at.secrets['ADMIN_PASSWORD'] = ADMIN_PASSWORD
     at.run()
     gated = (
         not at.exception
@@ -62,7 +78,7 @@ for label, path in PAGES:
     check(f'{label}: blocked at login, no content', gated)
 
 # 2. Wrong password rejected ----------------------------------------------------
-print('\n--- (2) wrong password rejected ---')
+print('\n--- (2) wrong main password rejected ---')
 at = AppTest.from_file(str(PAGES[0][1]), default_timeout=30)
 at.secrets['APP_PASSWORD'] = PASSWORD
 at.run()
@@ -73,8 +89,8 @@ check('wrong password -> not authenticated',
 check('wrong password -> error shown',
       any('Incorrect password' in (e.value or '') for e in at.error))
 
-# 3. Correct password authenticates ---------------------------------------------
-print('\n--- (3) correct password unlocks ---')
+# 3. Correct password authenticates non-admin pages ------------------------------
+print('\n--- (3) correct main password unlocks non-admin pages ---')
 at = AppTest.from_file(str(PAGES[0][1]), default_timeout=30)
 at.secrets['APP_PASSWORD'] = PASSWORD
 at.run()
@@ -92,6 +108,54 @@ check('missing secret -> not authenticated',
       not _authed(at))
 check('missing secret -> config error shown',
       any('APP_PASSWORD is not configured' in (e.value or '') for e in at.error))
+
+# 5. Admin-only pages stay gated behind a second password ------------------------
+print('\n--- (5) admin-only pages require ADMIN_PASSWORD even after main login ---')
+for label, path in PAGES:
+    at = AppTest.from_file(str(path), default_timeout=30)
+    at.secrets['APP_PASSWORD'] = PASSWORD
+    at.secrets['ADMIN_PASSWORD'] = ADMIN_PASSWORD
+    at.session_state['authenticated'] = True
+    at.run()
+    if label in ADMIN_PAGES:
+        check(f'{label}: admin gate shown (not yet unlocked)',
+              not at.exception and not _is_admin(at) and _admin_gate_shown(at))
+    else:
+        check(f'{label}: renders without admin gate',
+              not at.exception and not _admin_gate_shown(at))
+
+# 6. Wrong/correct/missing admin password behave like the main gate --------------
+print('\n--- (6) admin password wrong/correct/missing ---')
+admin_page = next(p for label, p in PAGES if label == 'My Bets')
+
+at = AppTest.from_file(str(admin_page), default_timeout=30)
+at.secrets['APP_PASSWORD'] = PASSWORD
+at.secrets['ADMIN_PASSWORD'] = ADMIN_PASSWORD
+at.session_state['authenticated'] = True
+at.run()
+at.text_input[0].set_value('not the admin password').run()
+at.button[0].click().run()
+check('wrong admin password -> not admin', not _is_admin(at))
+check('wrong admin password -> error shown',
+      any('Incorrect admin password' in (e.value or '') for e in at.error))
+
+at = AppTest.from_file(str(admin_page), default_timeout=30)
+at.secrets['APP_PASSWORD'] = PASSWORD
+at.secrets['ADMIN_PASSWORD'] = ADMIN_PASSWORD
+at.session_state['authenticated'] = True
+at.run()
+at.text_input[0].set_value(ADMIN_PASSWORD).run()
+at.button[0].click().run()
+check('correct admin password -> is_admin', _is_admin(at))
+check('correct admin password -> admin gate gone', not _admin_gate_shown(at))
+
+at = AppTest.from_file(str(admin_page), default_timeout=30)
+at.secrets['APP_PASSWORD'] = PASSWORD
+at.session_state['authenticated'] = True
+at.run()  # no ADMIN_PASSWORD secret set
+check('missing ADMIN_PASSWORD -> not admin', not _is_admin(at))
+check('missing ADMIN_PASSWORD -> config error shown',
+      any('ADMIN_PASSWORD is not configured' in (e.value or '') for e in at.error))
 
 print('\n' + '=' * 55)
 if failures:

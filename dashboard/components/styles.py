@@ -30,6 +30,7 @@ BOT_COLORS = {
     'the_accountant': '#8B5CF6',   # purple
     'degen_darren':   '#FFB454',   # amber
 }
+ADMIN_COLOR = '#F6465D'   # red — visually distinct from all 3 bot accents
 C_FADE = '#4B5262'   # muted gray — fades (no side taken)
 
 
