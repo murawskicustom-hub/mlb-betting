@@ -26,7 +26,7 @@ from io import StringIO
 import requests
 import csv
 
-from database import init_db, get_connection
+from database import init_db, get_connection, upsert_sql
 from logger import get_logger
 
 STATS_URL_TMPL = 'https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_{season}.csv'
@@ -104,10 +104,12 @@ def pull_features(season: int, week: int) -> dict:
                     value = float(raw)
                 except ValueError:
                     continue
-                conn.execute("""
-                    INSERT OR REPLACE INTO features (game_id, sport, as_of_date, key, value, value_text)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (game_id, 'nfl', as_of_date, f'{team}:{col}', value, None))
+                conn.execute(
+                    upsert_sql('features',
+                               ['game_id', 'sport', 'as_of_date', 'key', 'value', 'value_text'],
+                               ['game_id', 'as_of_date', 'key']),
+                    (game_id, 'nfl', as_of_date, f'{team}:{col}', value, None),
+                )
                 total_written += 1
 
         log_pull(conn, now_utc, True)

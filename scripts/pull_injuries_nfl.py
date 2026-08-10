@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from database import init_db, get_connection
+from database import init_db, get_connection, upsert_sql
 from logger import get_logger
 
 CORE_BASE = 'https://sports.core.api.espn.com/v2/sports/football/leagues/nfl'
@@ -140,15 +140,17 @@ def pull_injuries(season: int, week: int, teams: list[str] | None = None) -> dic
 
             injuries = fetch_team_injuries(team_id, season)
             for inj in injuries:
-                conn.execute("""
-                    INSERT OR REPLACE INTO features (game_id, sport, as_of_date, key, value, value_text)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    game_id, 'nfl', as_of_date,
-                    f"injury:{team}:{inj['athlete_name']}",
-                    None,
-                    f"{inj['designation']} - {inj['short_comment']}".strip(' -'),
-                ))
+                conn.execute(
+                    upsert_sql('features',
+                               ['game_id', 'sport', 'as_of_date', 'key', 'value', 'value_text'],
+                               ['game_id', 'as_of_date', 'key']),
+                    (
+                        game_id, 'nfl', as_of_date,
+                        f"injury:{team}:{inj['athlete_name']}",
+                        None,
+                        f"{inj['designation']} - {inj['short_comment']}".strip(' -'),
+                    ),
+                )
                 total_written += 1
             log.info(f'{team}: {len(injuries)} real-designation injuries written')
 

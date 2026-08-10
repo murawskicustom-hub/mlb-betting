@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from database import init_db, get_connection
+from database import init_db, get_connection, upsert_sql
 from logger import get_logger
 
 ODDS_API_KEY  = os.getenv('ODDS_API_KEY')
@@ -186,12 +186,14 @@ def pull_odds_manual_stub(season: int, week: int) -> dict:
                     continue
                 price = (r.get('price_american') or '').strip()
                 line  = (r.get('line') or '').strip()
-                conn.execute("""
-                    INSERT OR REPLACE INTO odds_snapshots
-                        (game_id, sport, book, market, outcome_type, line, price_american, price_decimal, snapshot_time_utc)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (r['game_id'], 'nfl', r.get('book', 'manual'), r['market'], r['outcome_type'],
-                      float(line) if line else None, int(price) if price else None, None, now_utc))
+                conn.execute(
+                    upsert_sql('odds_snapshots',
+                               ['game_id', 'sport', 'book', 'market', 'outcome_type', 'line',
+                                'price_american', 'price_decimal', 'snapshot_time_utc'],
+                               ['game_id', 'book', 'market', 'outcome_type', 'snapshot_time_utc']),
+                    (r['game_id'], 'nfl', r.get('book', 'manual'), r['market'], r['outcome_type'],
+                     float(line) if line else None, int(price) if price else None, None, now_utc),
+                )
                 rows_written += 1
         log_pull(conn, now_utc, 'manual_odds_stub', True)
 
