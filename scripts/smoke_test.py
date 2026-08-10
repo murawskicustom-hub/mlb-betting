@@ -63,10 +63,20 @@ for mod in ('components.metrics', 'components.styles',
 
 
 # ------------------------------------------------------------------
-# 3. scripts imported by pages
+# 3. scripts imported by pages / the orchestrator
 # ------------------------------------------------------------------
-print('\n--- scripts (used by dashboard) ---')
-for mod in ('analyzer', 'model_v1', 'devig', 'consensus'):
+print('\n--- scripts (used by dashboard / orchestrator) ---')
+# run_slot.py is intentionally excluded here: it sets DB_BACKEND=postgres as a
+# module-level side effect (via os.environ.setdefault), which would leak into
+# every check that runs after it in this same process. It's exercised directly
+# (python scripts/run_slot.py <slot>) instead.
+for mod in ('devig', 'consensus', 'grader', 'clv_calculator', 'notify'):
+    check('import ' + mod, lambda m=mod: importlib.import_module(m))
+
+print('\n--- bots ---')
+sys.path.insert(0, str(PROJECT_ROOT))
+for mod in ('bots.base', 'bots.registry', 'bots.config',
+            'bots.coach_bo', 'bots.the_accountant', 'bots.degen_darren'):
     check('import ' + mod, lambda m=mod: importlib.import_module(m))
 
 
@@ -77,7 +87,7 @@ print('\n--- name-level import audit ---')
 
 dashboard_files = [
     DASHBOARD_DIR / 'app.py',
-    DASHBOARD_DIR / 'pages' / '1_Today.py',
+    DASHBOARD_DIR / 'pages' / '1_This_Week.py',
     DASHBOARD_DIR / 'pages' / '2_Performance.py',
     DASHBOARD_DIR / 'pages' / '3_My_Bets.py',
     DASHBOARD_DIR / 'pages' / '4_Settings.py',
@@ -94,7 +104,7 @@ def _load_mod(mod_name):
     return _mod_cache[mod_name]
 
 target_prefixes = (
-    'components.', 'database', 'analyzer', 'model_v1',
+    'components.', 'database', 'settings',
     'devig', 'consensus', 'grader', 'clv_calculator',
 )
 
@@ -139,7 +149,7 @@ try:
 
     page_files = [
         ('Home (app.py)',    DASHBOARD_DIR / 'app.py'),
-        ('Today',           DASHBOARD_DIR / 'pages' / '1_Today.py'),
+        ('This Week',       DASHBOARD_DIR / 'pages' / '1_This_Week.py'),
         ('Performance',     DASHBOARD_DIR / 'pages' / '2_Performance.py'),
         ('My Bets',         DASHBOARD_DIR / 'pages' / '3_My_Bets.py'),
         ('Settings',        DASHBOARD_DIR / 'pages' / '4_Settings.py'),

@@ -22,14 +22,15 @@ C_TEXT       = '#E6E9EF'   # primary text
 C_MUTED      = '#8B92A8'   # secondary / label text
 C_LABEL      = '#6B7280'   # tile labels — clearly subordinate
 C_GRID       = '#1A1F2E'   # chart gridlines
-C_MODEL      = '#8B5CF6'   # purple — Algo 2 model signal
+C_MODEL      = '#8B5CF6'   # purple — reserved accent
 
-SLOT_TIMES = [
-    ('morning',  7,  0),
-    ('midday',  12,  0),
-    ('pregame', 17,  0),
-    ('closing', 23,  0),
-]
+# One accent color per bot, used for the pick-card stripe/prices and charts.
+BOT_COLORS = {
+    'coach_bo':       '#00D4AA',   # teal
+    'the_accountant': '#8B5CF6',   # purple
+    'degen_darren':   '#FFB454',   # amber
+}
+C_FADE = '#4B5262'   # muted gray — fades (no side taken)
 
 
 # ── Main CSS injection ────────────────────────────────────────────────────────
@@ -187,7 +188,7 @@ hr {{
 }}
 
 [data-testid="stSidebarContent"]::before {{
-    content: 'CMJ BETS';
+    content: '3 BETTORS';
     display: block;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
@@ -394,14 +395,8 @@ hr {{
 .card-stripe {{
     width: 4px;
     flex-shrink: 0;
-    background: {C_BORDER};
+    background: var(--accent, {C_BORDER});
 }}
-.play-card.sig-green .card-stripe {{ background: {C_ACCENT}; }}
-.play-card.sig-green {{
-    box-shadow: 0 0 24px rgba(0,212,170,0.07), inset 0 1px 0 rgba(255,255,255,0.03);
-}}
-.play-card.sig-yellow .card-stripe {{ background: {C_YELLOW}; }}
-.play-card.sig-red .card-stripe {{ background: {C_RED_MUTED}; opacity: 0.7; }}
 
 .card-body {{
     flex: 1;
@@ -438,11 +433,9 @@ hr {{
     padding: 3px 8px;
     border-radius: 3px;
     background: rgba(255,255,255,0.04);
-    color: {C_MUTED};
+    color: var(--accent, {C_MUTED});
     border: 1px solid {C_BORDER};
 }}
-.play-card.sig-green .card-market-tag {{ color: {C_ACCENT}; border-color: rgba(0,212,170,0.2); background: rgba(0,212,170,0.06); }}
-.play-card.sig-yellow .card-market-tag {{ color: {C_YELLOW}; border-color: rgba(255,180,84,0.2); background: rgba(255,180,84,0.06); }}
 
 .card-prices {{
     padding: 14px 22px;
@@ -458,13 +451,10 @@ hr {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 28px;
     font-weight: 600;
-    color: #FFFFFF;
+    color: var(--accent, #FFFFFF);
     font-variant-numeric: tabular-nums;
     line-height: 1;
 }}
-.play-card.sig-green .price-target {{ color: {C_ACCENT}; }}
-.play-card.sig-yellow .price-target {{ color: {C_YELLOW}; }}
-.play-card.sig-red .price-target {{ color: {C_MUTED}; }}
 
 .price-fair {{
     font-family: 'JetBrains Mono', monospace;
@@ -478,10 +468,8 @@ hr {{
     font-weight: 600;
     margin-top: 6px;
     letter-spacing: 0.04em;
+    color: var(--accent, {C_MUTED});
 }}
-.play-card.sig-green .price-edge {{ color: {C_ACCENT}; }}
-.play-card.sig-yellow .price-edge {{ color: {C_YELLOW}; }}
-.play-card.sig-red .price-edge {{ color: {C_MUTED}; }}
 .price-stake {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
@@ -496,19 +484,7 @@ hr {{
     letter-spacing: 0.06em;
 }}
 
-/* ── Model (Algo 2) card variant ──────────────────────── */
-.play-card.sig-model .card-stripe {{ background: {C_MODEL}; }}
-.play-card.sig-model {{
-    box-shadow: 0 0 24px rgba(139,92,246,0.07), inset 0 1px 0 rgba(255,255,255,0.03);
-    border-color: rgba(139,92,246,0.25);
-}}
-.play-card.sig-model .card-market-tag {{
-    color: {C_MODEL}; border-color: rgba(139,92,246,0.25); background: rgba(139,92,246,0.07);
-}}
-.play-card.sig-model .price-target {{ color: {C_MODEL}; }}
-.play-card.sig-model .price-edge {{ color: {C_MODEL}; }}
-
-.model-notes {{
+.pick-notes {{
     font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
     color: {C_LABEL};
@@ -517,8 +493,8 @@ hr {{
     letter-spacing: 0.02em;
 }}
 
-/* ── F5 market badge ──────────────────────────────────── */
-.f5-badge {{
+/* ── Shadow (paper-tracked) badge ─────────────────────── */
+.shadow-badge {{
     display: inline-block;
     font-size: 9px;
     font-weight: 700;
@@ -526,53 +502,46 @@ hr {{
     text-transform: uppercase;
     padding: 2px 6px;
     border-radius: 3px;
-    background: rgba(255,180,84,0.10);
-    border: 1px solid rgba(255,180,84,0.28);
-    color: {C_YELLOW};
+    background: rgba(255,255,255,0.05);
+    border: 1px solid {C_BORDER};
+    color: {C_MUTED};
     margin-left: 8px;
     vertical-align: middle;
 }}
 
-/* ── First-inning (YRFI/NRFI) badge ──────────────────── */
-.first-inn-badge {{
-    display: inline-block;
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    padding: 2px 6px;
-    border-radius: 3px;
-    background: rgba(139,92,246,0.12);
-    border: 1px solid rgba(139,92,246,0.30);
-    color: {C_MODEL};
-    margin-left: 8px;
-    vertical-align: middle;
+/* ── Fade card + badge ─────────────────────────────────── */
+.fade-row {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border: 1px dashed {C_BORDER};
+    border-radius: 8px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: {C_MUTED};
 }}
-
-/* ── Both-algos badge ─────────────────────────────────── */
-.both-algos-badge {{
+.fade-badge {{
     display: inline-block;
     font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
     padding: 2px 7px;
     border-radius: 3px;
-    background: linear-gradient(90deg, rgba(0,212,170,0.15), rgba(139,92,246,0.15));
-    border: 1px solid rgba(139,92,246,0.3);
-    color: {C_MODEL};
-    margin-left: 8px;
-    vertical-align: middle;
+    background: rgba(75,82,98,0.18);
+    border: 1px solid {C_FADE};
+    color: {C_FADE};
 }}
 
-/* ── Algo section divider ─────────────────────────────── */
-.algo-section-header {{
+/* ── Bot section divider ──────────────────────────────── */
+.bot-section-header {{
     display: flex;
     align-items: center;
     gap: 12px;
     margin: 20px 0 12px 0;
 }}
-.algo-section-label {{
+.bot-section-label {{
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.14em;
@@ -581,19 +550,6 @@ hr {{
     border-bottom: 1px solid {C_BORDER};
     padding-bottom: 6px;
     flex: 1;
-}}
-.algo-section-label.model-label {{ color: {C_MODEL}; border-color: rgba(139,92,246,0.25); }}
-.algo-unproven-tag {{
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: {C_LABEL};
-    background: rgba(139,92,246,0.08);
-    border: 1px solid rgba(139,92,246,0.18);
-    border-radius: 3px;
-    padding: 2px 7px;
-    white-space: nowrap;
 }}
 
 /* ── Log bet button below card ────────────────────────── */
@@ -769,97 +725,52 @@ def empty_state(lead: str, sub: str = '', preview: str = '') -> None:
 """, unsafe_allow_html=True)
 
 
-def play_card(rec: dict) -> str:
-    """Return HTML for one play card."""
+def pick_card(rec: dict, bot_display_name: str, accent_color: str) -> str:
+    """Return HTML for one bot's pick card (any bot — accent color distinguishes them)."""
     from components.formatters import fmt_american, fmt_game_time, market_label
 
-    color    = rec.get('confidence_color', 'red')
-    sig_cls  = {'green': 'sig-green', 'yellow': 'sig-yellow', 'red': 'sig-red'}.get(color, 'sig-red')
-
     teams    = f"{rec['away_team']} @ {rec['home_team']}"
-    gametime = fmt_game_time(rec.get('game_datetime_utc', ''))
-    away_p   = rec.get('away_pitcher') or 'TBD'
-    home_p   = rec.get('home_pitcher') or 'TBD'
-    pitching = f'{away_p} vs {home_p}'
+    gametime = fmt_game_time(rec.get('start_utc', ''))
     mkt_str  = market_label(rec['market'], rec['side'], rec.get('line')).upper()
 
-    target    = fmt_american(rec['target_price_american'])
-    fair      = fmt_american(rec['fair_price_american'])
-    edge      = rec.get('edge_percent', 0)
-    edge_str  = f'+{edge:.2f}%' if edge >= 0 else f'{edge:.2f}%'
-    stake     = rec.get('recommended_stake_dollars_at_2500', 0)
-    stake_str = f'${stake:.0f}' if stake else '—'
-    books     = rec.get('num_books_in_consensus', 0)
-
-    is_f5     = rec.get('market', '') in ('f5_moneyline', 'f5_total')
-    f5_badge  = '<span class="f5-badge">F5</span>' if is_f5 else ''
-
-    return f"""
-<div class="play-card {sig_cls}">
-  <div class="card-stripe"></div>
-  <div class="card-body">
-    <div class="card-teams">{teams}{f5_badge}</div>
-    <div class="card-time">{gametime}</div>
-    <div class="card-pitching">{pitching}</div>
-    <div class="card-market-tag">{mkt_str}</div>
-  </div>
-  <div class="card-prices">
-    <div class="price-target">{target}</div>
-    <div class="price-fair">fair {fair}</div>
-    <div class="price-edge">{edge_str} EDGE</div>
-    <div class="price-stake">stake {stake_str} @ $2500</div>
-    <div class="price-books">{books} BOOKS</div>
-  </div>
-</div>"""
-
-
-def model_play_card(rec: dict, has_devig_match: bool = False) -> str:
-    """Return HTML for an Algo 2 model play card (purple accent)."""
-    from components.formatters import fmt_american, fmt_game_time, market_label
-
-    color   = rec.get('confidence_color', 'red')
-    # Model cards always use sig-model stripe; dim opacity for lower signals
-    opacity = '1' if color == 'green' else ('0.88' if color == 'yellow' else '0.72')
-
-    teams    = f"{rec['away_team']} @ {rec['home_team']}"
-    gametime = fmt_game_time(rec.get('game_datetime_utc', ''))
-    away_p   = rec.get('away_pitcher') or 'TBD'
-    home_p   = rec.get('home_pitcher') or 'TBD'
-    pitching = f'{away_p} vs {home_p}'
-    mkt_str  = market_label(rec['market'], rec['side'], rec.get('line')).upper()
-
-    target     = fmt_american(rec['target_price_american'])
-    model_prob = rec.get('model_probability')
-    prob_str   = f'{model_prob:.1%}' if model_prob is not None else '—'
-    edge       = rec.get('edge_percent', 0)
-    edge_str   = f'+{edge:.2f}%' if edge >= 0 else f'{edge:.2f}%'
-    books      = rec.get('num_books_in_consensus', 0)
-    notes      = rec.get('model_notes') or ''
-
-    is_f5         = rec.get('market', '') in ('f5_moneyline', 'f5_total')
-    is_first_inn  = rec.get('market', '') in ('yrfi', 'nrfi')
-    f5_badge      = '<span class="f5-badge">F5</span>' if is_f5 else ''
-    first_inn_badge = '<span class="first-inn-badge">1ST INN</span>' if is_first_inn else ''
-    both_badge    = '<span class="both-algos-badge">BOTH ALGOS</span>' if has_devig_match else ''
-    notes_html = f'<div class="model-notes">{notes}</div>' if notes else ''
+    target   = fmt_american(rec.get('target_price_american'))
+    fair     = fmt_american(rec.get('fair_price_american'))
+    edge     = rec.get('edge_percent')
+    edge_str = (f'+{edge:.2f}%' if edge >= 0 else f'{edge:.2f}%') if edge is not None else '—'
+    units    = rec.get('units') or 0
+    confidence = rec.get('confidence') or f'{units}u'
+    shadow_badge = '<span class="shadow-badge">SHADOW</span>' if rec.get('is_shadow') else ''
+    notes    = rec.get('notes') or ''
+    notes_html = f'<div class="pick-notes">{notes}</div>' if notes else ''
 
     return f"""
-<div class="play-card sig-model" style="opacity:{opacity}">
+<div class="play-card" style="--accent:{accent_color}">
   <div class="card-stripe"></div>
   <div class="card-body">
-    <div class="card-teams">{teams}{f5_badge}{first_inn_badge}{both_badge}</div>
+    <div class="card-teams">{teams}{shadow_badge}</div>
     <div class="card-time">{gametime}</div>
-    <div class="card-pitching">{pitching}</div>
-    <div class="card-market-tag">{mkt_str}</div>
+    <div class="card-market-tag">{bot_display_name.upper()} &middot; {mkt_str}</div>
     {notes_html}
   </div>
   <div class="card-prices">
     <div class="price-target">{target}</div>
-    <div class="price-fair">model p={prob_str}</div>
-    <div class="price-edge">{edge_str} EDGE</div>
-    <div class="price-stake">paper · $25/pick</div>
-    <div class="price-books">{books} BOOKS</div>
+    <div class="price-fair">fair {fair}</div>
+    <div class="price-edge">{edge_str} EDGE &middot; {confidence}</div>
+    <div class="price-stake">{units}u</div>
   </div>
+</div>"""
+
+
+def fade_row(game: dict, bot_display_name: str) -> str:
+    """Return HTML for one bot's fade (skip) on a game — visible, not silent."""
+    from components.formatters import fmt_game_time
+    teams    = f"{game['away_team']} @ {game['home_team']}"
+    gametime = fmt_game_time(game.get('start_utc', ''))
+    return f"""
+<div class="fade-row">
+  <span class="fade-badge">FADE</span>
+  <span>{bot_display_name} sat out <strong>{teams}</strong></span>
+  <span style="margin-left:auto;color:{C_LABEL};font-size:11px;">{gametime}</span>
 </div>"""
 
 

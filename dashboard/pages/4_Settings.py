@@ -1,5 +1,5 @@
 """
-4_Settings.py — Bankroll settings and data health status.
+4_Settings.py — current season/week override and data health status.
 """
 
 import sys
@@ -12,69 +12,71 @@ import pandas as pd
 
 from database import get_connection, init_db
 from components.auth import require_login
-from settings import get_bankroll, set_bankroll, get_setting
-from components.metrics import data_status
-from components.formatters import fmt_datetime_et
+from settings import get_setting, set_setting
+from components.metrics import data_status, BOT_DISPLAY_NAMES
 from components.styles import inject_custom_css, section_head, page_header
 
-st.set_page_config(page_title='Settings — MLB Betting', page_icon='⚙️', layout='wide',
+SPORT = 'nfl'
+
+st.set_page_config(page_title='Settings — 3 Bettors', page_icon='⚙️', layout='wide',
                    initial_sidebar_state='expanded')
 inject_custom_css()
 require_login()   # password gate — nothing below renders until authenticated
 init_db()
 
-page_header('SETTINGS', 'Bankroll & data health')
+page_header('SETTINGS', 'Season, bots & data health')
 
-# ── Bankroll ──────────────────────────────────────────────────────────────────
-section_head('BANKROLL')
+# ── Current season/week ───────────────────────────────────────────────────────
+section_head('CURRENT SEASON / WEEK')
+st.markdown(
+    '<span style="font-size:11px;font-family:\'JetBrains Mono\',monospace;color:#8B92A8;">'
+    'Drives which week run_slot.py operates on. tuesday_grade auto-advances the week; '
+    'override here only to correct a mistake or manually skip ahead.</span>',
+    unsafe_allow_html=True,
+)
 
 with get_connection() as conn:
-    current_bankroll = get_bankroll(conn)
-    updated_row = conn.execute(
-        "SELECT updated_at_utc FROM settings WHERE key='bankroll_dollars'"
-    ).fetchone()
-    updated_at = updated_row[0] if updated_row else None
+    current_season = int(get_setting(conn, f'{SPORT}_current_season', '2026'))
+    current_week = int(get_setting(conn, f'{SPORT}_current_week', '1'))
 
-col_val, col_form = st.columns([1, 2])
-col_val.markdown(
-    f'<div class="m-tile positive" style="display:inline-block;min-width:160px;">'
-    f'<div class="m-label">CURRENT BANKROLL</div>'
-    f'<div class="m-value accent">${current_bankroll:,.2f}</div>'
-    f'</div>',
-    unsafe_allow_html=True
+with st.form('season_week_form'):
+    col1, col2 = st.columns(2)
+    with col1:
+        new_season = st.number_input('SEASON', value=current_season, step=1, format='%d')
+    with col2:
+        new_week = st.number_input('WEEK', value=current_week, min_value=1, max_value=22, step=1, format='%d')
+    if st.form_submit_button('SAVE'):
+        with get_connection() as conn:
+            set_setting(conn, f'{SPORT}_current_season', str(int(new_season)))
+            set_setting(conn, f'{SPORT}_current_week', str(int(new_week)))
+        st.success(f'Set to season {int(new_season)}, week {int(new_week)}')
+        st.rerun()
+
+# ── Registered bots ────────────────────────────────────────────────────────────
+section_head('REGISTERED BOTS')
+st.dataframe(
+    pd.DataFrame([{'BOT KEY': k, 'DISPLAY NAME': v} for k, v in BOT_DISPLAY_NAMES.items()]),
+    width='stretch', hide_index=True,
 )
-if updated_at:
-    col_val.markdown(
-        f'<span style="font-size:11px;font-family:\'JetBrains Mono\',monospace;color:#8B92A8;">'
-        f'UPDATED: {fmt_datetime_et(updated_at)}</span>',
-        unsafe_allow_html=True
-    )
-
-with col_form:
-    with st.form('bankroll_form'):
-        new_bankroll = st.number_input(
-            'NEW BANKROLL ($)', min_value=100.0, max_value=1_000_000.0,
-            value=float(current_bankroll), step=100.0, format='%.2f'
-        )
-        if st.form_submit_button('SAVE'):
-            with get_connection() as conn:
-                set_bankroll(conn, new_bankroll)
-            st.success(f'BANKROLL UPDATED → ${new_bankroll:,.2f}')
-            st.rerun()
 
 # ── Data status ───────────────────────────────────────────────────────────────
 section_head('DATA STATUS')
 
 with get_connection() as conn:
-    status = data_status(conn)
+    status = data_status(conn, SPORT)
 
 col_a, col_b, col_c = st.columns(3)
 col_a.metric('TOTAL GAMES',     status['total_games'])
 col_a.metric('ODDS SNAPSHOTS',  f"{status['total_snapshots']:,}")
 col_b.metric('RECOMMENDATIONS', status['total_recs'],
              delta=f"{status['graded_recs']} graded / {status['pending_recs']} pending")
-col_c.metric('PERSONAL BETS',   status['total_bets'],
+col_c.metric('BETS',            status['total_bets'],
              delta=f"{status['graded_bets']} graded / {status['pending_bets']} pending")
+st.markdown(
+    f'<span style="font-size:11px;font-family:\'JetBrains Mono\',monospace;color:#8B92A8;">'
+    f'{status["total_fades"]} fade rows tracked (excluded from grading/units)</span>',
+    unsafe_allow_html=True,
+)
 
 section_head('LAST SCHEDULED RUN PER SLOT')
 slot_data = [

@@ -37,15 +37,20 @@ def fmt_clv(value) -> str:
 
 
 def utc_to_eastern(utc_str: str) -> datetime | None:
-    """Parse an ISO UTC string and return an Eastern-tz datetime, or None."""
+    """Parse an ISO UTC string and return an Eastern-tz datetime, or None.
+
+    ESPN's timestamps omit seconds ('...T00:20Z'); MLB Stats API/most other
+    sources include them ('...T00:20:00Z') — try both.
+    """
     if not utc_str:
         return None
-    try:
-        dt = datetime.strptime(utc_str, '%Y-%m-%dT%H:%M:%SZ').replace(
-            tzinfo=pytz.utc)
-        return dt.astimezone(EASTERN)
-    except (ValueError, TypeError):
-        return None
+    for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%MZ'):
+        try:
+            dt = datetime.strptime(utc_str, fmt).replace(tzinfo=pytz.utc)
+            return dt.astimezone(EASTERN)
+        except (ValueError, TypeError):
+            continue
+    return None
 
 
 def _no_pad(dt, directive: str) -> str:
@@ -85,13 +90,10 @@ def fmt_game_label(away: str, home: str, utc_str: str = None) -> str:
     return f'{away} @ {home}{time_part}'
 
 
-def color_tag(color: str) -> str:
-    """Return an emoji/symbol for a confidence color."""
-    return {'green': '🟢', 'yellow': '🟡', 'red': '🔴'}.get(color, '⚪')
-
-
 def market_label(market: str, side: str, line) -> str:
     """Human-readable market+side+line string."""
+    if not market or not side:
+        return market or '—'
     if market == 'moneyline':
         return f'ML {side.capitalize()}'
     elif market == 'total':
@@ -100,13 +102,4 @@ def market_label(market: str, side: str, line) -> str:
     elif market == 'spread':
         line_str = f' {line:+g}' if line is not None else ''
         return f'Spread {side.capitalize()}{line_str}'
-    elif market == 'f5_moneyline':
-        return f'F5 ML {side.capitalize()}'
-    elif market == 'f5_total':
-        line_str = f' {line}' if line is not None else ''
-        return f'F5 Total {side.capitalize()}{line_str}'
-    elif market == 'yrfi':
-        return 'YRFI'
-    elif market == 'nrfi':
-        return 'NRFI'
     return market

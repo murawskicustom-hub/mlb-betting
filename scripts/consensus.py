@@ -9,14 +9,13 @@ from devig import american_to_probability, probability_to_american, devig_two_wa
 
 log = get_logger('consensus')
 
-# F5 variants map to the same consensus logic as their full-game counterparts
-_MONEYLINE_MARKETS = ('moneyline', 'f5_moneyline')
-_TOTAL_MARKETS     = ('total',     'f5_total')
+_MONEYLINE_MARKETS = ('moneyline',)
+_TOTAL_MARKETS     = ('total',)
 
 
 # ── Snapshot retrieval ────────────────────────────────────────────────────────
 
-def get_latest_snapshots(conn, game_pk: int, market: str,
+def get_latest_snapshots(conn, game_id: str, market: str,
                          snapshot_time_utc: str = None) -> list:
     """
     Return the most recent odds_snapshots row per (book, outcome_type) for the
@@ -31,29 +30,29 @@ def get_latest_snapshots(conn, game_pk: int, market: str,
             SELECT book, outcome_type, line, price_american, price_decimal,
                    snapshot_time_utc, api_last_update_utc
             FROM odds_snapshots
-            WHERE game_pk = ? AND market = ?
+            WHERE game_id = ? AND market = ?
               AND (book, outcome_type, snapshot_time_utc) IN (
                   SELECT book, outcome_type, MAX(snapshot_time_utc)
                   FROM odds_snapshots
-                  WHERE game_pk = ? AND market = ?
+                  WHERE game_id = ? AND market = ?
                   GROUP BY book, outcome_type
               )
-        """, (game_pk, market, game_pk, market)).fetchall()
+        """, (game_id, market, game_id, market)).fetchall()
     else:
         rows = conn.execute("""
             SELECT book, outcome_type, line, price_american, price_decimal,
                    snapshot_time_utc, api_last_update_utc
             FROM odds_snapshots
-            WHERE game_pk = ? AND market = ?
+            WHERE game_id = ? AND market = ?
               AND snapshot_time_utc <= ?
               AND (book, outcome_type, snapshot_time_utc) IN (
                   SELECT book, outcome_type, MAX(snapshot_time_utc)
                   FROM odds_snapshots
-                  WHERE game_pk = ? AND market = ? AND snapshot_time_utc <= ?
+                  WHERE game_id = ? AND market = ? AND snapshot_time_utc <= ?
                   GROUP BY book, outcome_type
               )
-        """, (game_pk, market, snapshot_time_utc,
-              game_pk, market, snapshot_time_utc)).fetchall()
+        """, (game_id, market, snapshot_time_utc,
+              game_id, market, snapshot_time_utc)).fetchall()
 
     return [dict(r) for r in rows]
 
@@ -84,7 +83,6 @@ def compute_consensus_fair_price(snapshots: list, market: str) -> dict | None:
     Or None if consensus cannot be computed.
     """
     if market in _MONEYLINE_MARKETS:
-        # f5_moneyline uses identical consensus logic to moneyline (home/away sides)
         sides = ('home', 'away')
         consensus_line = None
 
@@ -121,9 +119,6 @@ def compute_consensus_fair_price(snapshots: list, market: str) -> dict | None:
         }
 
     elif market in _TOTAL_MARKETS:
-        # f5_total uses identical consensus logic to total (over/under, modal line).
-        # F5 lines are typically 4.5/5.0/5.5; the modal-line logic handles small
-        # float values cleanly since it keys on the line value, not its magnitude.
         sides = ('over', 'under')
 
         by_book_line: dict[tuple, dict] = defaultdict(dict)
@@ -178,7 +173,7 @@ def compute_consensus_fair_price(snapshots: list, market: str) -> dict | None:
 
 # ── Edge finder ───────────────────────────────────────────────────────────────
 
-def find_edges_for_game(conn, game_pk: int, market: str,
+def find_edges_for_game(conn, game_id: str, market: str,
                         min_books: int = 4) -> list[dict]:
     """
     Return a list of per-(book, outcome) edge dicts for one game/market.
@@ -186,7 +181,7 @@ def find_edges_for_game(conn, game_pk: int, market: str,
     """
     from devig import edge_percent
 
-    snapshots = get_latest_snapshots(conn, game_pk, market)
+    snapshots = get_latest_snapshots(conn, game_id, market)
     if not snapshots:
         return []
 
@@ -196,7 +191,7 @@ def find_edges_for_game(conn, game_pk: int, market: str,
 
     if consensus['num_books'] < min_books:
         log.debug(
-            f'Consensus too thin: game_pk={game_pk} market={market} — '
+            f'Consensus too thin: game_id={game_id} market={market} — '
             f'only {consensus["num_books"]} book(s), need {min_books}'
         )
         return []
@@ -220,7 +215,7 @@ def find_edges_for_game(conn, game_pk: int, market: str,
         ep = edge_percent(row['price_american'], fair_p_american)
 
         results.append({
-            'game_pk':              game_pk,
+            'game_id':              game_id,
             'market':               market,
             'side':                 outcome_type,
             'line':                 consensus['consensus_line'],

@@ -58,7 +58,7 @@ def _render_login():
     with mid:
         st.markdown(
             "<div style='text-align:center;margin-top:14vh'>"
-            "<div style='font-size:40px;font-weight:800;letter-spacing:-1px'>⚾ MLB Betting</div>"
+            "<div style='font-size:40px;font-weight:800;letter-spacing:-1px'>🏈 3 Bettors</div>"
             "<div style='color:#8b8b8b;margin:6px 0 18px;font-size:14px'>"
             "Enter password to continue</div></div>",
             unsafe_allow_html=True,
