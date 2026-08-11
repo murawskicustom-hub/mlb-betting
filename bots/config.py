@@ -35,7 +35,7 @@ BOT_TIERS: dict[str, list[tuple[int, float, float]]] = {
 
 BOT_CONFIG_VERSION: dict[str, str] = {
     'coach_bo': 'coach_bo:llm-v1',
-    'the_accountant': 'the_accountant:v1',
+    'the_accountant': 'the_accountant:epa-model-v1',
     'degen_darren': 'degen_darren:v1',
 }
 

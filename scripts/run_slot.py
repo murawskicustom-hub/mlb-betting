@@ -239,14 +239,14 @@ def run_tuesday_research(conn, log: logging.Logger) -> dict:
     ok_sched  = run_script('pull_schedule_nfl.py', [season, week], log)
     ok_odds   = run_script('pull_odds_nfl.py', [season, week], log)
     ok_inj    = run_script('pull_injuries_nfl.py', [season, week], log)
-    ok_feat   = run_script('pull_features_nfl.py', [season, week], log)
     ok_depth  = run_script('pull_depth_charts_nfl.py', [season, week], log)
-    # Coaching tendencies (PROE, 4th-down aggression) are season-to-date and
-    # slow-moving — pulled once a week here, not re-pulled at every lock slot.
+    # Coaching tendencies + efficiency (PROE, 4th-down aggression, offensive/
+    # defensive EPA) are season-to-date and slow-moving — pulled once a week
+    # here, not re-pulled at every lock slot.
     ok_tend   = run_script('pull_tendencies_nfl.py', [season, week], log)
     return {
         'schedule': ok_sched, 'odds': ok_odds, 'injuries': ok_inj,
-        'features': ok_feat, 'depth_charts': ok_depth, 'tendencies': ok_tend,
+        'depth_charts': ok_depth, 'tendencies': ok_tend,
     }
 
 
