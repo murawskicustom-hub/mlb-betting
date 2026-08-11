@@ -9,10 +9,13 @@ high-confidence. Bots with a numeric edge/probability estimate must never
 hardcode their own thresholds; they call tier_for() and pass along whatever
 it returns (or skip the pick if it returns None).
 
-coach_bo is NOT in BOT_TIERS on purpose: his edge is qualitative (a football
-story, not a numeric edge_pct/fair_prob), so his dual-axis gate — is there a
-real story, and how strong is it — is baked directly into the LLM call in
-bots/coach_bo.py instead. Same mandate, different mechanism.
+coach_bo and degen_darren are NOT in BOT_TIERS on purpose. coach_bo's edge is
+qualitative (a football story, not a numeric edge_pct/fair_prob), so his
+dual-axis gate — is there a real story, and how strong is it — is baked
+directly into the LLM call in bots/coach_bo.py instead. degen_darren's edge
+is line-movement magnitude (points or implied-probability delta), which
+isn't an edge_pct/fair_prob pair either — his sizing tiers live directly in
+bots/degen_darren.py. Same mandate, different mechanism, in both cases.
 
 Bump the numbers here (not inside a bot file) when retuning a bot, and bump
 BOT_CONFIG_VERSION[key] alongside it so recommendations.config_version can
@@ -25,18 +28,12 @@ BOT_TIERS: dict[str, list[tuple[int, float, float]]] = {
         (3, 0.05, 0.58),
         (5, 0.08, 0.65),
     ],
-    'degen_darren': [
-        (1, 0.02, 0.51),
-        (2, 0.02, 0.51),
-        (3, 0.04, 0.55),
-        (5, 0.08, 0.60),
-    ],
 }
 
 BOT_CONFIG_VERSION: dict[str, str] = {
     'coach_bo': 'coach_bo:llm-v2-all-markets',
     'the_accountant': 'the_accountant:epa-model-v2-all-markets',
-    'degen_darren': 'degen_darren:v1',
+    'degen_darren': 'degen_darren:line-movement-v1',
 }
 
 
