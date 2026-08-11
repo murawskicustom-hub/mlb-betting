@@ -1,20 +1,28 @@
 """
 pull_tendencies_nfl.py — pull season-to-date coaching tendency stats (pass
-rate over expected, 4th-down go-for-it rate) from nflverse play-by-play into
-the features table. No API key required.
+rate over expected, 4th-down go-for-it rate) plus each team's defensive
+EPA/play allowed against the pass and against the run, from nflverse
+play-by-play into the features table. No API key required.
 
 Usage:
     python pull_tendencies_nfl.py <season> <week>
 
 Source: play_by_play_{season}.csv.gz from the nflverse-data "pbp" GitHub
 release — nflverse already computes pass_oe (PROE: how much more/less a team
-passes than expectation, given down/distance/score/time) per play, so this
-is a groupby-mean, not a model we build ourselves. 4th-down aggression is
-computed here: (plays where the offense ran/passed on 4th down, i.e. went
-for it) / (all 4th-down plays where a real decision was made — excludes
-kneels/spikes). Aggregated season-to-date through the given week, not just
-that week, since coaching tendencies are a slow-moving signal and a
-single-week sample is noisy.
+passes than expectation, given down/distance/score/time) and epa (Expected
+Points Added) per play, so these are groupby-means, not models we build
+ourselves. 4th-down aggression is computed here: (plays where the offense
+ran/passed on 4th down, i.e. went for it) / (all 4th-down plays where a real
+decision was made — excludes kneels/spikes). The defensive EPA figures are
+grouped by defteam instead of posteam: mean EPA per play the team's defense
+has ALLOWED, split by whether the play was a pass or a run. Positive means
+the opposing offense gained value there (a weakness); negative means the
+defense suppressed it (a strength). This exists so a bot can spot a real
+scheme mismatch — e.g. a pass-heavy offense (high PROE) facing a defense
+that's been bleeding EPA against the pass — not just look at each team in
+isolation. All of these are aggregated season-to-date through the given
+week, not just that week, since coaching tendencies are a slow-moving signal
+and a single-week sample is noisy.
 
 Like pull_features_nfl.py, this file doesn't exist for a season until
 nflverse has processed real games, so a 404 before Week 1 is expected and
@@ -35,8 +43,8 @@ from logger import get_logger
 PBP_URL_TMPL = 'https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_{season}.csv.gz'
 
 # Only pull the columns needed — the full file has ~370 columns per play.
-USECOLS = ['week', 'posteam', 'down', 'pass', 'rush', 'qb_kneel', 'qb_spike',
-           'punt_attempt', 'field_goal_attempt', 'pass_oe']
+USECOLS = ['week', 'posteam', 'defteam', 'down', 'pass', 'rush', 'qb_kneel', 'qb_spike',
+           'punt_attempt', 'field_goal_attempt', 'pass_oe', 'epa']
 
 log = get_logger('pull_tendencies_nfl')
 
@@ -56,12 +64,16 @@ def fetch_pbp(season: int) -> pd.DataFrame | None:
 
 
 def compute_tendencies(df: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
-    """Season-to-date (weeks 1..week inclusive) PROE and 4th-down aggression per team."""
-    df = df[(df['week'] <= week) & df['posteam'].notna()].copy()
+    """Season-to-date (weeks 1..week inclusive) PROE, 4th-down aggression, and
+    defensive EPA/play allowed (vs pass, vs run) per team."""
+    df = df[df['week'] <= week].copy()
+    off = df[df['posteam'].notna()].copy()
 
-    proe = df.groupby('posteam')['pass_oe'].mean().rename('proe')
+    proe = off.groupby('posteam')['pass_oe'].mean()
+    proe.index.name = 'team'
+    proe = proe.rename('proe')
 
-    fourth = df[df['down'] == 4].copy()
+    fourth = off[off['down'] == 4].copy()
     went_for_it = ((fourth['pass'] == 1) | (fourth['rush'] == 1)) & \
                   (fourth['qb_kneel'] != 1) & (fourth['qb_spike'] != 1)
     real_fourth = (fourth['punt_attempt'] == 1) | (fourth['field_goal_attempt'] == 1) | went_for_it
@@ -69,9 +81,19 @@ def compute_tendencies(df: pd.DataFrame, season: int, week: int) -> pd.DataFrame
     fourth = fourth[fourth['real_fourth']]
     agg_rate = fourth.groupby('posteam').apply(
         lambda g: g['went_for_it'].sum() / len(g) if len(g) > 0 else None, include_groups=False
-    ).rename('fourth_down_agg_rate')
+    )
+    agg_rate.index.name = 'team'
+    agg_rate = agg_rate.rename('fourth_down_agg_rate')
 
-    return pd.concat([proe, agg_rate], axis=1).reset_index().rename(columns={'posteam': 'team'})
+    defense = df[df['defteam'].notna() & df['epa'].notna()].copy()
+    def_pass = defense[defense['pass'] == 1].groupby('defteam')['epa'].mean()
+    def_pass.index.name = 'team'
+    def_pass = def_pass.rename('def_epa_vs_pass')
+    def_rush = defense[defense['rush'] == 1].groupby('defteam')['epa'].mean()
+    def_rush.index.name = 'team'
+    def_rush = def_rush.rename('def_epa_vs_rush')
+
+    return pd.concat([proe, agg_rate, def_pass, def_rush], axis=1).reset_index()
 
 
 def game_id_for_team(conn, team: str, season: int, week: int) -> str | None:
@@ -109,7 +131,7 @@ def pull_tendencies(season: int, week: int) -> dict:
             if game_id is None:
                 continue  # team not playing this week — still fine, just nothing to attach it to
             teams_matched += 1
-            for col in ('proe', 'fourth_down_agg_rate'):
+            for col in ('proe', 'fourth_down_agg_rate', 'def_epa_vs_pass', 'def_epa_vs_rush'):
                 val = row[col]
                 if pd.isna(val):
                     continue

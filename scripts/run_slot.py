@@ -27,7 +27,7 @@ import os
 import subprocess
 import logging
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 # The orchestrator (scheduled runs + manual catch-ups) targets Postgres so the
 # laptop and the GitHub Actions cloud job both write to the same Neon DB.
@@ -267,6 +267,28 @@ def _already_decided_game_ids(conn, bot_key: str, sport: str, game_ids: list[str
     return {r['game_id'] for r in rows}
 
 
+# A real lock slot only ever fires within a few days of kickoff (thursday_lock
+# for Tue-Fri games, sunday_lock the morning of Sunday games, monday_lock the
+# afternoon of MNF). If the earliest game in scope is further out than this, the
+# slot was manually dispatched against a future week's games — almost certainly
+# to test the pipeline before the season has actually started, not to place a
+# real weekly lock. Writing real recommendation rows in that case would count
+# against a bot's official record before the challenge begins, and — because of
+# the idempotency check above — would permanently block the real, up-to-date
+# pick from ever being generated once the actual lock slot fires for that game.
+LOCK_WINDOW_DAYS = 5
+
+
+def _earliest_game_date(games: list[dict]) -> date | None:
+    dates = [g['game_date'] for g in games if g.get('game_date')]
+    if not dates:
+        return None
+    try:
+        return min(date.fromisoformat(d) for d in dates)
+    except ValueError:
+        return None
+
+
 def run_lock_slot(slot: str, conn, log: logging.Logger) -> dict:
     season, week = current_season_week(conn)
     day_filter = DAY_FILTERS.get(slot)
@@ -287,6 +309,18 @@ def run_lock_slot(slot: str, conn, log: logging.Logger) -> dict:
     if not games:
         log.warning(f'{slot}: no games in scope for {season} week {week}')
         return {'games': 0}
+
+    earliest = _earliest_game_date(games)
+    if earliest is not None:
+        days_out = (earliest - datetime.now(timezone.utc).date()).days
+        if days_out > LOCK_WINDOW_DAYS:
+            log.warning(
+                f'{slot}: earliest game is {days_out} day(s) out (> {LOCK_WINDOW_DAYS}) — '
+                f'this looks like a pre-season pipeline test, not a real lock. Data was '
+                f'refreshed above, but skipping bot picks and notify so nothing gets '
+                f'written to the official record.'
+            )
+            return {'games': len(games), 'skipped_test_window': True, 'days_out': days_out}
 
     now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     game_ids = [g['game_id'] for g in games]

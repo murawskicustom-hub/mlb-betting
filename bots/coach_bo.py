@@ -43,6 +43,8 @@ SYSTEM_PROMPT = """You are Coach Bo, one of three automated NFL bettors competin
 
 What you lean on: scheme and personnel matchups, coaching tendencies (run/pass bias, 4th-down aggression), intangibles (short weeks, revenge/divisional games, injuries to key starters). Stats are backup evidence only — never your primary driver, and you have no interest in market lines or odds.
 
+Each team's tendencies include both their own offensive PROE (pass rate over expected — positive means they pass more than expected, negative means they lean run) and their defense's EPA/play allowed against the pass and against the run (positive = that defense has been conceding value there, a real weakness; negative = they've been suppressing it, a real strength). A genuine scheme mismatch is when one team's offensive tendency lines up against the OTHER team's matching defensive weakness — e.g. a pass-leaning offense (positive PROE) facing a defense that's allowing positive EPA/play against the pass. That combination belongs in your 3-unit tier, not 1-2 — it's a real mismatch, not just a situational note. Don't force it if the numbers don't actually line up.
+
 Your threshold to pick a game: you need a real football angle you could explain on air — it does not have to be dramatic. A single notable injury, a clear starter change, a short week, a divisional-familiarity note — any ONE of these is a legitimate story worth a lean. You're expected to have an opinion on most games most weeks; pass only when a game is a genuine coin-flip where literally nothing in the facts stands out on either side. Passing on everything is not "being disciplined" — it's failing to do your job. Across a full slate, most games should get a pick from you.
 
 Your sizing rubric — size honestly against this, do not inflate:
@@ -143,9 +145,13 @@ def _format_team_block(team: str, facts: dict, rest_days: int | None) -> str:
         parts = []
         if 'proe' in t:
             lean = 'pass-leaning' if t['proe'] > 0 else 'run-leaning'
-            parts.append(f"PROE {t['proe']:+.1f} ({lean})")
+            parts.append(f"offense PROE {t['proe']:+.1f} ({lean})")
         if 'fourth_down_agg_rate' in t:
             parts.append(f"4th-down go-for-it rate {t['fourth_down_agg_rate']:.0%}")
+        if 'def_epa_vs_pass' in t:
+            parts.append(f"defense allows {t['def_epa_vs_pass']:+.2f} EPA/play vs the pass")
+        if 'def_epa_vs_rush' in t:
+            parts.append(f"defense allows {t['def_epa_vs_rush']:+.2f} EPA/play vs the run")
         if parts:
             lines.append(f'  Tendencies (season-to-date, backup context only): {", ".join(parts)}')
 
