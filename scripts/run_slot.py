@@ -236,23 +236,51 @@ def persist_picks_and_fades(conn, bot, ctx: BotContext, picks: list, now_utc: st
 def run_tuesday_research(conn, log: logging.Logger) -> dict:
     season, week = current_season_week(conn)
     log.info(f'tuesday_research: {season} week {week} — pulling full week')
-    ok_sched = run_script('pull_schedule_nfl.py', [season, week], log)
-    ok_odds  = run_script('pull_odds_nfl.py', [season, week], log)
-    ok_inj   = run_script('pull_injuries_nfl.py', [season, week], log)
-    ok_feat  = run_script('pull_features_nfl.py', [season, week], log)
-    return {'schedule': ok_sched, 'odds': ok_odds, 'injuries': ok_inj, 'features': ok_feat}
+    ok_sched  = run_script('pull_schedule_nfl.py', [season, week], log)
+    ok_odds   = run_script('pull_odds_nfl.py', [season, week], log)
+    ok_inj    = run_script('pull_injuries_nfl.py', [season, week], log)
+    ok_feat   = run_script('pull_features_nfl.py', [season, week], log)
+    ok_depth  = run_script('pull_depth_charts_nfl.py', [season, week], log)
+    # Coaching tendencies (PROE, 4th-down aggression) are season-to-date and
+    # slow-moving — pulled once a week here, not re-pulled at every lock slot.
+    ok_tend   = run_script('pull_tendencies_nfl.py', [season, week], log)
+    return {
+        'schedule': ok_sched, 'odds': ok_odds, 'injuries': ok_inj,
+        'features': ok_feat, 'depth_charts': ok_depth, 'tendencies': ok_tend,
+    }
+
+
+def _already_decided_game_ids(conn, bot_key: str, sport: str, game_ids: list[str]) -> set[str]:
+    """Game ids this bot already has ANY recommendation row for (pick or
+    fade) this run. Used to make lock slots idempotent: a retry (GitHub
+    Actions hiccup, manual re-run) must not re-decide a game a bot already
+    committed to — especially once a bot's generate() makes a live LLM call,
+    where a re-run could produce a different, non-reproducible answer."""
+    if not game_ids:
+        return set()
+    placeholders = ','.join('?' * len(game_ids))
+    rows = conn.execute(
+        f'SELECT DISTINCT game_id FROM recommendations '
+        f'WHERE bot_key = ? AND sport = ? AND game_id IN ({placeholders})',
+        [bot_key, sport, *game_ids],
+    ).fetchall()
+    return {r['game_id'] for r in rows}
 
 
 def run_lock_slot(slot: str, conn, log: logging.Logger) -> dict:
     season, week = current_season_week(conn)
     day_filter = DAY_FILTERS.get(slot)
 
-    # Refresh injuries/odds for just the teams in scope before locking.
+    # Refresh injuries/depth charts/odds for just the teams in scope before
+    # locking. Depth charts are worth re-pulling here (not just Tuesday) since
+    # a starter can change mid-week due to injury; tendencies are season-to-date
+    # and don't need a mid-week refresh.
     run_script('pull_schedule_nfl.py', [season, week], log)
     teams_scope = slate_for(conn, season, week, day_filter)
     team_args = sorted({g['home_team'] for g in teams_scope} | {g['away_team'] for g in teams_scope})
     if team_args:
         run_script('pull_injuries_nfl.py', [season, week, *team_args], log)
+        run_script('pull_depth_charts_nfl.py', [season, week, *team_args], log)
     run_script('pull_odds_nfl.py', [season, week], log)
 
     games = slate_for(conn, season, week, day_filter)
@@ -260,14 +288,23 @@ def run_lock_slot(slot: str, conn, log: logging.Logger) -> dict:
         log.warning(f'{slot}: no games in scope for {season} week {week}')
         return {'games': 0}
 
-    ctx = build_context(conn, games)
-    now_utc = ctx.as_of_utc
+    now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    game_ids = [g['game_id'] for g in games]
 
     picks_by_bot: dict[str, list] = {}
     fades_by_bot: dict[str, int] = {}
     for bot in registry.bots_for_sport(SPORT):
-        picks = bot.generate(ctx)
-        n_picks, n_fades = persist_picks_and_fades(conn, bot, ctx, picks, now_utc)
+        decided = _already_decided_game_ids(conn, bot.key, SPORT, game_ids)
+        remaining = [g for g in games if g['game_id'] not in decided]
+        if decided:
+            log.info(f'  {bot.key}: {len(decided)} game(s) already decided this week — skipping re-pick')
+        if not remaining:
+            log.info(f'  {bot.key}: nothing new to decide this slot')
+            continue
+
+        bot_ctx = build_context(conn, remaining)
+        picks = bot.generate(bot_ctx)
+        n_picks, n_fades = persist_picks_and_fades(conn, bot, bot_ctx, picks, now_utc)
         picks_by_bot[bot.key] = picks
         fades_by_bot[bot.key] = n_fades
         log.info(f'  {bot.key}: {n_picks} pick(s), {n_fades} fade(s)')
