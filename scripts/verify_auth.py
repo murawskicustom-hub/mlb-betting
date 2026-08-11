@@ -24,11 +24,14 @@ from streamlit.testing.v1 import AppTest
 
 DASH = Path(__file__).resolve().parents[1] / 'dashboard'
 PAGES = [
-    ('Home (app.py)', DASH / 'app.py'),
-    ('This Week',     DASH / 'pages' / '1_This_Week.py'),
-    ('Performance',   DASH / 'pages' / '2_Performance.py'),
-    ('My Bets',       DASH / 'pages' / '3_My_Bets.py'),
-    ('Settings',      DASH / 'pages' / '4_Settings.py'),
+    ('Home (app.py)',   DASH / 'app.py'),
+    ('This Week',       DASH / 'pages' / '1_This_Week.py'),
+    ('Performance',     DASH / 'pages' / '2_Performance.py'),
+    ('Coach Bo',        DASH / 'pages' / '3_Coach_Bo.py'),
+    ('The Accountant',  DASH / 'pages' / '4_The_Accountant.py'),
+    ('Degen Darren',    DASH / 'pages' / '5_Degen_Darren.py'),
+    ('My Bets',         DASH / 'pages' / '6_My_Bets.py'),
+    ('Settings',        DASH / 'pages' / '7_Settings.py'),
 ]
 ADMIN_PAGES = {'My Bets', 'Settings'}
 

@@ -18,6 +18,7 @@ import os
 from datetime import datetime, timezone
 
 import requests
+import pytz
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -25,6 +26,8 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 from logger import get_logger
 
 log = get_logger('notify')
+
+EASTERN = pytz.timezone('US/Eastern')
 
 BOT_WEBHOOKS = {
     'coach_bo':       os.getenv('COACH_BO_DISCORD_WEBHOOK', ''),
@@ -56,6 +59,28 @@ def _matchup(game: dict) -> str:
     return f'{game.get("away_team", "?")} @ {game.get("home_team", "?")}'
 
 
+def _game_time_et(game: dict) -> str:
+    """Return 'Wed 9/10 8:20 PM ET' style string from a games-row's start_utc,
+    or 'TBD' if missing/unparseable. ESPN's timestamps omit seconds
+    ('...T00:20Z'); handle both with/without seconds. Avoids the %-m/%-d/%-I
+    strftime extensions (Linux-only — GitHub Actions runs fine, but they raise
+    ValueError on Windows, where this also needs to run for local dev/testing)."""
+    start_utc = game.get('start_utc', '')
+    if not start_utc:
+        return 'TBD'
+    for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%MZ'):
+        try:
+            dt_utc = datetime.strptime(start_utc, fmt).replace(tzinfo=timezone.utc)
+            dt_et = dt_utc.astimezone(EASTERN)
+            month = str(int(dt_et.strftime('%m')))
+            day = str(int(dt_et.strftime('%d')))
+            hour12 = str(int(dt_et.strftime('%I')))
+            return f"{dt_et.strftime('%a')} {month}/{day} {hour12}:{dt_et.strftime('%M %p')} ET"
+        except ValueError:
+            continue
+    return 'TBD'
+
+
 def _post(webhook_url: str, payload: dict) -> bool:
     try:
         resp = requests.post(webhook_url, json=payload, timeout=10)
@@ -81,11 +106,11 @@ def send_bot_pick(bot_key: str, pick, game: dict) -> bool:
     edge_str   = f'{pick.edge_pct:+.1%}' if pick.edge_pct is not None else 'n/a'
 
     description = (
+        f'🕐 {_game_time_et(game)}\n'
         f'**{mkt_label}{line_str} {side_label}**\n'
-        f'Confidence: {pick.confidence} ({pick.units}u) | Edge: {edge_str}'
+        f'Units: {pick.units:.1f}u | Confidence: {pick.confidence} | Edge: {edge_str}'
     )
-    if pick.notes:
-        description += f'\n{pick.notes}'
+    description += f'\nWhy: {pick.notes}' if pick.notes else '\nWhy: —'
 
     payload = {'embeds': [{
         'title': f'{_matchup(game)}',
@@ -120,9 +145,13 @@ def send_slot_digest(slot_name: str, picks_by_bot: dict, fades_by_bot: dict, gam
                 side_label = _side_label(p.market, p.side, game)
                 line_str   = f' {p.line}' if p.line is not None else ''
                 shadow_tag = ' [shadow]' if p.is_shadow else ''
+                reasoning  = p.notes if p.notes else '—'
                 lines.append(
-                    f'`{p.confidence}` {_matchup(game)} - {mkt_label}{line_str} {side_label}{shadow_tag}'
+                    f'`{p.confidence}` {_matchup(game)} — {_game_time_et(game)}\n'
+                    f'{mkt_label}{line_str} {side_label} · {p.units:.1f}u{shadow_tag}\n'
+                    f'Why: {reasoning}'
                 )
+                lines.append('')  # blank line between picks for readability
         else:
             lines.append('_No picks this slot._')
 

@@ -89,8 +89,11 @@ dashboard_files = [
     DASHBOARD_DIR / 'app.py',
     DASHBOARD_DIR / 'pages' / '1_This_Week.py',
     DASHBOARD_DIR / 'pages' / '2_Performance.py',
-    DASHBOARD_DIR / 'pages' / '3_My_Bets.py',
-    DASHBOARD_DIR / 'pages' / '4_Settings.py',
+    DASHBOARD_DIR / 'pages' / '3_Coach_Bo.py',
+    DASHBOARD_DIR / 'pages' / '4_The_Accountant.py',
+    DASHBOARD_DIR / 'pages' / '5_Degen_Darren.py',
+    DASHBOARD_DIR / 'pages' / '6_My_Bets.py',
+    DASHBOARD_DIR / 'pages' / '7_Settings.py',
 ]
 
 _mod_cache = {}
@@ -151,8 +154,11 @@ try:
         ('Home (app.py)',    DASHBOARD_DIR / 'app.py'),
         ('This Week',       DASHBOARD_DIR / 'pages' / '1_This_Week.py'),
         ('Performance',     DASHBOARD_DIR / 'pages' / '2_Performance.py'),
-        ('My Bets',         DASHBOARD_DIR / 'pages' / '3_My_Bets.py'),
-        ('Settings',        DASHBOARD_DIR / 'pages' / '4_Settings.py'),
+        ('Coach Bo',        DASHBOARD_DIR / 'pages' / '3_Coach_Bo.py'),
+        ('The Accountant',  DASHBOARD_DIR / 'pages' / '4_The_Accountant.py'),
+        ('Degen Darren',    DASHBOARD_DIR / 'pages' / '5_Degen_Darren.py'),
+        ('My Bets',         DASHBOARD_DIR / 'pages' / '6_My_Bets.py'),
+        ('Settings',        DASHBOARD_DIR / 'pages' / '7_Settings.py'),
     ]
     for label, path in page_files:
         def _run(p=path, lbl=label):
