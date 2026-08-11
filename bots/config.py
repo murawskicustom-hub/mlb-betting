@@ -5,9 +5,14 @@ Each tier is (units, min_edge_pct, min_fair_prob): a bot only fires that unit
 size when BOTH the edge and the probability floor clear. This is a
 platform-mandated *mechanic* (see PLATFORM_HANDOFF.md) — the previous MLB
 build tiered on edge alone and it mislabeled high-edge longshots as
-high-confidence. Bots must never hardcode their own thresholds; they call
-tier_for() and pass along whatever it returns (or skip the pick if it
-returns None).
+high-confidence. Bots with a numeric edge/probability estimate must never
+hardcode their own thresholds; they call tier_for() and pass along whatever
+it returns (or skip the pick if it returns None).
+
+coach_bo is NOT in BOT_TIERS on purpose: his edge is qualitative (a football
+story, not a numeric edge_pct/fair_prob), so his dual-axis gate — is there a
+real story, and how strong is it — is baked directly into the LLM call in
+bots/coach_bo.py instead. Same mandate, different mechanism.
 
 Bump the numbers here (not inside a bot file) when retuning a bot, and bump
 BOT_CONFIG_VERSION[key] alongside it so recommendations.config_version can
@@ -15,13 +20,6 @@ segment "before" from "after" in the dashboard.
 """
 
 BOT_TIERS: dict[str, list[tuple[int, float, float]]] = {
-    'coach_bo': [
-        (1, 0.03, 0.52),
-        (2, 0.03, 0.52),
-        (3, 0.05, 0.55),
-        (4, 0.07, 0.58),
-        (5, 0.07, 0.62),
-    ],
     'the_accountant': [
         (1, 0.02, 0.53),
         (3, 0.05, 0.58),
@@ -36,7 +34,7 @@ BOT_TIERS: dict[str, list[tuple[int, float, float]]] = {
 }
 
 BOT_CONFIG_VERSION: dict[str, str] = {
-    'coach_bo': 'coach_bo:v1',
+    'coach_bo': 'coach_bo:llm-v1',
     'the_accountant': 'the_accountant:v1',
     'degen_darren': 'degen_darren:v1',
 }

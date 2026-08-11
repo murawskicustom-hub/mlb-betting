@@ -4,6 +4,9 @@
 # Data pulls / HTTP
 requests==2.34.2
 
+# LLM reasoning (Coach Bo)
+anthropic==0.121.0
+
 # Database backends
 psycopg2-binary==2.9.12     # Postgres (Neon) driver
 SQLAlchemy==2.0.51          # available for the abstraction layer (SQLite is stdlib)
@@ -12,7 +15,7 @@ SQLAlchemy==2.0.51          # available for the abstraction layer (SQLite is std
 python-dotenv==1.2.2
 pytz==2026.2
 
-# Analysis / dashboard
+# Analysis / dashboard (pandas also used by pull_tendencies_nfl.py for pbp aggregation)
 pandas==3.0.3
 numpy==2.4.6
 streamlit==1.58.0
