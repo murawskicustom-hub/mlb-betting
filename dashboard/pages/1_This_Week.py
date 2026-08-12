@@ -56,36 +56,41 @@ else:
     week_summary_bar(total_picks, total_fades, len(games))
     st.markdown('<div style="height:6px"></div>', unsafe_allow_html=True)
 
-    for bot_key, display_name in BOT_DISPLAY_NAMES.items():
-        bot_recs = [r for r in recs if r['bot_key'] == bot_key]
-        picks    = [r for r in bot_recs if not r['is_fade']]
-        fades    = [r for r in bot_recs if r['is_fade']]
-        accent   = BOT_COLORS.get(bot_key, '#8B92A8')
+    # One tab per bot rather than stacking all three sections — a full week
+    # (16 games x 3 bots x up to 3 markets each) can mean 100+ pick cards, and
+    # tabs keep only one bot's list on screen at a time instead of a single
+    # long scroll. Within each tab, picks sort by units descending so the
+    # bot's highest-conviction calls surface first.
+    tab_labels = [
+        f"{BOT_DISPLAY_NAMES[bot_key]} ({len([r for r in recs if r['bot_key'] == bot_key and not r['is_fade']])})"
+        for bot_key in BOT_DISPLAY_NAMES
+    ]
+    tabs = st.tabs(tab_labels)
 
-        st.markdown(f"""
-<div class="bot-section-header">
-  <div class="bot-section-label" style="color:{accent};border-color:{accent}33;">
-    {display_name.upper()} &middot; {len(picks)} pick{'s' if len(picks) != 1 else ''}, {len(fades)} fade{'s' if len(fades) != 1 else ''}
-  </div>
-</div>
-""", unsafe_allow_html=True)
+    for tab, (bot_key, display_name) in zip(tabs, BOT_DISPLAY_NAMES.items()):
+        with tab:
+            bot_recs = [r for r in recs if r['bot_key'] == bot_key]
+            picks    = sorted((r for r in bot_recs if not r['is_fade']),
+                              key=lambda r: r['units'] or 0, reverse=True)
+            fades    = [r for r in bot_recs if r['is_fade']]
+            accent   = BOT_COLORS.get(bot_key, '#8B92A8')
 
-        if picks:
-            for rec in picks:
-                st.markdown(pick_card(rec, display_name, accent), unsafe_allow_html=True)
-        else:
-            st.markdown(
-                '<span style="font-size:12px;font-family:\'JetBrains Mono\',monospace;'
-                'color:#8B92A8;">No picks yet this week.</span>',
-                unsafe_allow_html=True,
-            )
+            if picks:
+                for rec in picks:
+                    st.markdown(pick_card(rec, display_name, accent), unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    '<span style="font-size:12px;font-family:\'JetBrains Mono\',monospace;'
+                    'color:#8B92A8;">No picks yet this week.</span>',
+                    unsafe_allow_html=True,
+                )
 
-        if fades:
-            with st.expander(f'{len(fades)} FADE{"S" if len(fades) != 1 else ""} — GAMES SAT OUT'):
-                for f in fades:
-                    game = game_lookup.get(f['game_id'])
-                    if game:
-                        st.markdown(fade_row(game, display_name), unsafe_allow_html=True)
+            if fades:
+                with st.expander(f'{len(fades)} FADE{"S" if len(fades) != 1 else ""} — GAMES SAT OUT'):
+                    for f in fades:
+                        game = game_lookup.get(f['game_id'])
+                        if game:
+                            st.markdown(fade_row(game, display_name), unsafe_allow_html=True)
 
     # ── Full slate reference table ────────────────────────────────────────────
     st.markdown('<br>', unsafe_allow_html=True)
