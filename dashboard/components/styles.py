@@ -737,7 +737,9 @@ def pick_card(rec: dict, bot_display_name: str, accent_color: str) -> str:
     target   = fmt_american(rec.get('target_price_american'))
     fair     = fmt_american(rec.get('fair_price_american'))
     edge     = rec.get('edge_percent')
-    edge_str = (f'+{edge:.2f}%' if edge >= 0 else f'{edge:.2f}%') if edge is not None else '—'
+    # edge_percent is stored as a fraction (0.17 = 17%) — bots/config.py's tier
+    # thresholds and every bot's edge_pct computation agree on this convention.
+    edge_str = (f'+{edge * 100:.2f}%' if edge >= 0 else f'{edge * 100:.2f}%') if edge is not None else '—'
     units    = rec.get('units') or 0
     confidence = rec.get('confidence') or f'{units}u'
     shadow_badge = '<span class="shadow-badge">SHADOW</span>' if rec.get('is_shadow') else ''
