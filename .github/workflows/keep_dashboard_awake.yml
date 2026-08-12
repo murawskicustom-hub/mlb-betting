@@ -1,0 +1,56 @@
+name: Keep dashboard awake
+
+# Streamlit Community Cloud hibernates an app after ~12 hours with no visitor
+# traffic, showing a "Zzzz... this app has gone to sleep" screen until
+# someone clicks the wake-up button. A plain curl/HTTP GET returns 200 with
+# just the static HTML shell and never triggers real app activity — Streamlit
+# tracks traffic via an actual browser session (JS execution + websocket),
+# so this uses a real headless browser visit instead, well under the 12h
+# threshold. If the app happens to already be asleep (e.g. this workflow was
+# off for a while), it also clicks the wake-up button rather than failing.
+#
+# wait_until="domcontentloaded" (not "networkidle") is deliberate: Streamlit
+# keeps a persistent websocket open, so "networkidle" would likely hang
+# waiting for network activity that never fully stops.
+#
+# Completely separate from pulls.yml's cron — that one runs the actual
+# data/bot pipeline and is never affected by dashboard traffic either way.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Visit the app (and wake it if asleep)
+        run: |
+          python - <<'EOF'
+          from playwright.sync_api import sync_playwright
+
+          URL = "https://ai-nfl-challenge.streamlit.app/"
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page()
+              page.goto(URL, wait_until="domcontentloaded", timeout=120_000)
+              page.wait_for_timeout(5_000)
+
+              wake_btn = page.get_by_role("button", name="Yes, get this app back up!")
+              if wake_btn.count() > 0:
+                  print("App was asleep — clicking wake-up button")
+                  wake_btn.first.click()
+                  page.wait_for_timeout(60_000)
+              else:
+                  print("App was already awake — visit refreshed its activity timer")
+
+              browser.close()
+          EOF
