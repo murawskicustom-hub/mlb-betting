@@ -680,6 +680,26 @@ def status_bar(last_snapshot_utc: str, requests_remaining, last_db_update_utc: s
 """, unsafe_allow_html=True)
 
 
+def week_summary_bar(total_picks: int, total_fades: int, total_games: int) -> None:
+    """Compact one-line 'ping' strip for This Week: pick/fade/game counts at a
+    glance, before the full per-bot card list. Reuses the same slim status-bar
+    styling (and pulsing dot) as the Home page's SYSTEM LIVE indicator."""
+    st.markdown(f"""
+<div class="status-bar">
+  <div class="status-left">
+    <span class="dot-live"></span>
+    <span class="status-live-text">{total_picks} pick{'s' if total_picks != 1 else ''}</span>
+    <span class="status-sub">across 3 bots</span>
+  </div>
+  <div class="status-right">
+    <span>{total_fades} fade{'s' if total_fades != 1 else ''}</span>
+    <span class="status-divider">&middot;</span>
+    <span>{total_games} game{'s' if total_games != 1 else ''} this week</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+
 def metric_tile(label: str, value: str, delta: str = '',
                 accent: str = 'neutral') -> str:
     """Return HTML for one metric tile. accent: 'positive'|'negative'|'neutral'."""

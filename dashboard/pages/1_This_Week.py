@@ -16,7 +16,7 @@ from components.metrics import week_recs, games_for_week, current_season_week, B
 from components.formatters import fmt_game_time
 from components.styles import (
     inject_custom_css, pick_card, fade_row, empty_state, section_head,
-    page_header, BOT_COLORS,
+    page_header, BOT_COLORS, week_summary_bar,
 )
 
 SPORT = 'nfl'
@@ -50,6 +50,11 @@ if not games:
     )
 else:
     game_lookup = {g['game_id']: g for g in games}
+
+    total_picks = sum(1 for r in recs if not r['is_fade'])
+    total_fades = sum(1 for r in recs if r['is_fade'])
+    week_summary_bar(total_picks, total_fades, len(games))
+    st.markdown('<div style="height:6px"></div>', unsafe_allow_html=True)
 
     for bot_key, display_name in BOT_DISPLAY_NAMES.items():
         bot_recs = [r for r in recs if r['bot_key'] == bot_key]
