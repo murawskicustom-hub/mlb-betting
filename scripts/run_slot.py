@@ -27,7 +27,7 @@ import os
 import subprocess
 import logging
 from pathlib import Path
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 # The orchestrator (scheduled runs + manual catch-ups) targets Postgres so the
 # laptop and the GitHub Actions cloud job both write to the same Neon DB.
@@ -352,6 +352,27 @@ def run_lock_slot(slot: str, conn, log: logging.Logger) -> dict:
     return {'games': len(games), 'picks_by_bot': {k: len(v) for k, v in picks_by_bot.items()}}
 
 
+def _week_is_over(conn, season: int, week: int) -> bool:
+    """True only once every game in this week has actually kicked off (plus a
+    buffer for MNF to finish). tuesday_grade runs on a fixed weekly cron, so
+    without this check it would advance nfl_current_week every single Tuesday
+    regardless of whether the current week's games have actually been played
+    yet — exactly what silently ran the week counter from 1 to 6 during
+    preseason testing, pointing every lock slot at a real future week's
+    schedule (weeks away) while Week 1's actual games sat un-picked."""
+    row = conn.execute("""
+        SELECT MAX(start_utc) AS last_kickoff FROM games
+        WHERE sport = 'nfl' AND season = ? AND week = ?
+    """, (season, week)).fetchone()
+    if not row or not row['last_kickoff']:
+        return False   # no schedule data for this week at all — do not advance blindly
+    try:
+        last_kickoff = datetime.strptime(row['last_kickoff'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    return datetime.now(timezone.utc) > last_kickoff + timedelta(hours=6)
+
+
 def run_tuesday_grade(conn, log: logging.Logger) -> dict:
     grade_summary = grade_pending(conn)
     clv_summary = compute_clv(conn)
@@ -366,13 +387,19 @@ def run_tuesday_grade(conn, log: logging.Logger) -> dict:
         f'bets filled={clv_summary["bet_filled"]} skipped={clv_summary["bet_skipped"]}'
     )
 
-    # Advance to next week for the following slots, once this week is graded.
+    # Only advance once this week's games have actually all kicked off —
+    # never just because the weekly cron happened to fire (see _week_is_over).
     season, week = current_season_week(conn)
     now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    set_setting(conn, 'nfl_current_week', week + 1, now_utc)
-    log.info(f'  Advanced nfl_current_week: {week} -> {week + 1}')
+    if _week_is_over(conn, season, week):
+        set_setting(conn, 'nfl_current_week', week + 1, now_utc)
+        log.info(f'  Advanced nfl_current_week: {week} -> {week + 1}')
+        advanced_to = week + 1
+    else:
+        log.info(f'  Not advancing nfl_current_week ({week}) — this week\'s games have not all kicked off yet')
+        advanced_to = week
 
-    return {'grade': grade_summary, 'clv': clv_summary, 'advanced_to_week': week + 1}
+    return {'grade': grade_summary, 'clv': clv_summary, 'advanced_to_week': advanced_to}
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
