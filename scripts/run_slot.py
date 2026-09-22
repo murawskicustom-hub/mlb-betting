@@ -366,10 +366,19 @@ def _week_is_over(conn, season: int, week: int) -> bool:
     """, (season, week)).fetchone()
     if not row or not row['last_kickoff']:
         return False   # no schedule data for this week at all — do not advance blindly
-    try:
-        last_kickoff = datetime.strptime(row['last_kickoff'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
-    except ValueError:
+
+    # ESPN's start_utc sometimes omits seconds ('...T00:20Z' vs '...T00:20:00Z') —
+    # same dual-format handling notify.py's _game_time_et() already needed.
+    last_kickoff = None
+    for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%MZ'):
+        try:
+            last_kickoff = datetime.strptime(row['last_kickoff'], fmt).replace(tzinfo=timezone.utc)
+            break
+        except ValueError:
+            continue
+    if last_kickoff is None:
         return False
+
     return datetime.now(timezone.utc) > last_kickoff + timedelta(hours=6)
 
 
