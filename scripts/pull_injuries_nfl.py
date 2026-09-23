@@ -29,6 +29,17 @@ was silently bloating Coach Bo's grounded facts (and Degen Darren's notes)
 with stale, resolved injuries. Each pull now deletes all existing
 'injury:{team}:%' rows for that team's current game_id before writing the
 fresh list, so only what ESPN reports as current ever survives.
+
+Also computes and writes a numeric injury_impact:{team}:offense and
+injury_impact:{team}:defense score per team — a position-weighted,
+severity-weighted sum meant for a bot (bots/the_accountant.py) that wants a
+number, not prose, to fold into its own projection. ESPN's athlete detail
+(fetched here anyway, to get the display name) already includes the
+player's position at no extra API cost, so this needed no new data source.
+POSITION_WEIGHT and SEVERITY_WEIGHT below are a reasonable starting rubric —
+a starting QB matters far more than a backup long-snapper, and "Out" matters
+far more than "Questionable" (who often plays anyway) — NOT fit against any
+real results, since there's no graded history yet to fit them against.
 """
 
 import sys
@@ -55,6 +66,37 @@ ESPN_TEAM_IDS = {
 # recording. Excludes 'A' (Active) which is a routine roster-status log
 # entry, not an injury concern.
 REAL_DESIGNATIONS = {'Q', 'D', 'O', 'IR', 'PUP', 'SUSP', 'NFI'}
+
+# (weight, side) per position abbreviation — how much losing this position
+# for a game plausibly shifts a team's own EPA/play, and whether that's an
+# offensive or defensive concern. Special-teams positions (K/P/LS) are
+# excluded (weight 0): off_epa/def_epa are computed from pass/rush plays
+# only (see pull_tendencies_nfl.py), so a kicker's injury doesn't touch
+# either signal. Unknown/unlisted positions fall back to a small default.
+POSITION_WEIGHT: dict[str, tuple[float, str]] = {
+    'QB': (1.00, 'offense'),
+    'RB': (0.45, 'offense'), 'FB': (0.15, 'offense'),
+    'WR': (0.45, 'offense'), 'TE': (0.35, 'offense'),
+    'T': (0.35, 'offense'), 'OT': (0.35, 'offense'), 'G': (0.25, 'offense'),
+    'OG': (0.25, 'offense'), 'C': (0.30, 'offense'), 'OL': (0.30, 'offense'),
+    'DE': (0.35, 'defense'), 'EDGE': (0.35, 'defense'), 'DT': (0.30, 'defense'),
+    'NT': (0.25, 'defense'), 'DL': (0.30, 'defense'),
+    'LB': (0.35, 'defense'), 'ILB': (0.35, 'defense'), 'OLB': (0.35, 'defense'), 'MLB': (0.35, 'defense'),
+    'CB': (0.40, 'defense'), 'S': (0.35, 'defense'), 'SS': (0.35, 'defense'),
+    'FS': (0.35, 'defense'), 'DB': (0.35, 'defense'),
+    'K': (0.0, None), 'P': (0.0, None), 'LS': (0.0, None), 'PK': (0.0, None),
+}
+DEFAULT_POSITION_WEIGHT = (0.15, None)   # unknown position: small, attributed to neither side
+
+# How much of a position's weight actually applies, by designation severity —
+# "Questionable" players frequently play anyway, so count for much less than
+# "Out"/IR, which are certain absences.
+SEVERITY_WEIGHT: dict[str, float] = {
+    'O': 1.0, 'IR': 1.0, 'SUSP': 1.0,
+    'PUP': 0.9, 'NFI': 0.9,
+    'D': 0.7,
+    'Q': 0.3,
+}
 
 log = get_logger('pull_injuries_nfl')
 
@@ -88,17 +130,39 @@ def fetch_team_injuries(team_id: int, season: int, max_items: int = 25) -> list[
             continue
         athlete_ref = detail.get('athlete', {}).get('$ref')
         athlete_name = None
+        position = None
         if athlete_ref:
             athlete = _get(athlete_ref)
-            athlete_name = athlete.get('displayName') if athlete else None
+            if athlete:
+                athlete_name = athlete.get('displayName')
+                position = athlete.get('position', {}).get('abbreviation')
         out.append({
             'athlete_name': athlete_name or f'athlete_{item.get("$ref", "?").rsplit("/", 1)[-1]}',
             'designation': abbrev,
+            'position': position,
             'status': detail.get('status', ''),
             'short_comment': detail.get('shortComment', ''),
             'date': detail.get('date', ''),
         })
     return out
+
+
+def compute_injury_impact(injuries: list[dict]) -> tuple[float, float]:
+    """(offense_impact, defense_impact) for one team's injury list — see
+    module docstring for the position/severity weighting rationale."""
+    offense_impact = 0.0
+    defense_impact = 0.0
+    for inj in injuries:
+        weight, side = POSITION_WEIGHT.get(inj.get('position') or '', DEFAULT_POSITION_WEIGHT)
+        if side is None or weight == 0.0:
+            continue
+        severity = SEVERITY_WEIGHT.get(inj['designation'], 0.3)
+        impact = weight * severity
+        if side == 'offense':
+            offense_impact += impact
+        else:
+            defense_impact += impact
+    return offense_impact, defense_impact
 
 
 def teams_for_week(conn, season: int, week: int) -> list[str]:
@@ -153,14 +217,15 @@ def pull_injuries(season: int, week: int, teams: list[str] | None = None) -> dic
 
             injuries = fetch_team_injuries(team_id, season)
 
-            # Clear this team's existing injury rows for this game before
-            # writing the fresh list — see module docstring on why an upsert
-            # alone isn't enough (no "recovered" signal, and as_of_date is
-            # part of the unique index so a plain upsert would never collide
-            # with yesterday's rows anyway).
+            # Clear this team's existing injury rows (including its impact
+            # scores) for this game before writing the fresh list — see
+            # module docstring on why an upsert alone isn't enough (no
+            # "recovered" signal, and as_of_date is part of the unique index
+            # so a plain upsert would never collide with yesterday's rows
+            # anyway).
             conn.execute(
-                "DELETE FROM features WHERE game_id = ? AND key LIKE ?",
-                (game_id, f'injury:{team}:%'),
+                "DELETE FROM features WHERE game_id = ? AND (key LIKE ? OR key LIKE ?)",
+                (game_id, f'injury:{team}:%', f'injury_impact:{team}:%'),
             )
 
             for inj in injuries:
@@ -176,7 +241,19 @@ def pull_injuries(season: int, week: int, teams: list[str] | None = None) -> dic
                     ),
                 )
                 total_written += 1
-            log.info(f'{team}: {len(injuries)} real-designation injuries written')
+
+            offense_impact, defense_impact = compute_injury_impact(injuries)
+            for side, impact in (('offense', offense_impact), ('defense', defense_impact)):
+                conn.execute(
+                    upsert_sql('features',
+                               ['game_id', 'sport', 'as_of_date', 'key', 'value', 'value_text'],
+                               ['game_id', 'as_of_date', 'key']),
+                    (game_id, 'nfl', as_of_date, f'injury_impact:{team}:{side}', impact, None),
+                )
+                total_written += 1
+
+            log.info(f'{team}: {len(injuries)} real-designation injuries written '
+                      f'(injury impact: offense={offense_impact:.2f}, defense={defense_impact:.2f})')
 
         log_pull(conn, now_utc, True)
 

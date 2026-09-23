@@ -62,6 +62,19 @@ confident about. Still a starting number, not fit precisely — there's not
 enough graded history yet to fit it rigorously either. Revisit both this and
 the base scales once several more weeks of graded results exist.
 
+Injury adjustment (added Week 3, 2026): off_epa/def_epa are season-to-date
+averages, so they reflect whatever roster was healthy during those games —
+a team's real current-week strength can differ meaningfully if a key player
+is out now. scripts/pull_injuries_nfl.py computes a position-weighted,
+severity-weighted injury_impact score per team (offense and defense
+separately) from the same real ESPN injury data Coach Bo already reads.
+INJURY_EPA_SCALE converts that impact score into an EPA/play nudge, applied
+to that team's OWN off_epa (worse, if the injury is offensive) or def_epa
+(worse, i.e. allows more, if the injury is defensive) before the point
+projection — so injuries flow through margin AND total consistently, not
+bolted on separately. Like every other constant here, INJURY_EPA_SCALE is a
+reasonable starting number, not fit against real results.
+
 Dual-axis note: bots/config.py's tier_for() expects an edge_pct that's
 independent of fair_prob (normally "model probability vs market-implied
 probability"). The Accountant has no such independent second axis for any of
@@ -96,6 +109,8 @@ TOTAL_TO_LOGIT_SCALE = 0.12     # scales a projected total-points diff into a lo
 CONFIDENCE_RAMP_GAMES = 4
 CONFIDENCE_FLOOR = 0.5
 
+INJURY_EPA_SCALE = 0.08   # converts an injury_impact score into an EPA/play nudge
+
 
 def _confidence_factor(games_played: float) -> float:
     ramp = min(max(games_played, 0.0) / CONFIDENCE_RAMP_GAMES, 1.0)
@@ -114,6 +129,14 @@ def _team_epa(features: dict, team: str) -> tuple[float, float] | None:
 def _games_played(features: dict, team: str) -> float:
     val = features.get(f'tendency:{team}:games_played')
     return float(val) if val is not None else 0.0
+
+
+def _injury_impact(features: dict, team: str) -> tuple[float, float]:
+    """(offense_impact, defense_impact) for this team, 0.0 if not present."""
+    off_imp = features.get(f'injury_impact:{team}:offense')
+    def_imp = features.get(f'injury_impact:{team}:defense')
+    return (float(off_imp) if off_imp is not None else 0.0,
+            float(def_imp) if def_imp is not None else 0.0)
 
 
 def _projected_points(home_off: float, home_def: float, away_off: float, away_def: float) -> tuple[float, float]:
@@ -156,9 +179,33 @@ class TheAccountant(Bot):
 
             home_off, home_def = home_epa
             away_off, away_def = away_epa
-            home_pts, away_pts = _projected_points(home_off, home_def, away_off, away_def)
+
+            # Injuries hurt a team's OWN unit: an offensive injury lowers
+            # that team's own off_epa; a defensive injury raises (worsens)
+            # that team's own def_epa (more EPA/play allowed).
+            home_off_inj, home_def_inj = _injury_impact(features, home)
+            away_off_inj, away_def_inj = _injury_impact(features, away)
+            home_off_adj = home_off - INJURY_EPA_SCALE * home_off_inj
+            home_def_adj = home_def + INJURY_EPA_SCALE * home_def_inj
+            away_off_adj = away_off - INJURY_EPA_SCALE * away_off_inj
+            away_def_adj = away_def + INJURY_EPA_SCALE * away_def_inj
+
+            home_pts, away_pts = _projected_points(home_off_adj, home_def_adj, away_off_adj, away_def_adj)
             projected_margin = home_pts - away_pts
             projected_total = home_pts + away_pts
+
+            injury_fragments = []
+            if home_off_inj > 0 or home_def_inj > 0:
+                injury_fragments.append(
+                    f'{home} injury-adj (off {-INJURY_EPA_SCALE * home_off_inj:+.3f}, '
+                    f'def {INJURY_EPA_SCALE * home_def_inj:+.3f})'
+                )
+            if away_off_inj > 0 or away_def_inj > 0:
+                injury_fragments.append(
+                    f'{away} injury-adj (off {-INJURY_EPA_SCALE * away_off_inj:+.3f}, '
+                    f'def {INJURY_EPA_SCALE * away_def_inj:+.3f})'
+                )
+            injury_note = f' [{"; ".join(injury_fragments)}]' if injury_fragments else ''
 
             # Dampen confidence, not the point projections themselves, by how
             # little current-season data either side of this matchup has —
@@ -173,7 +220,7 @@ class TheAccountant(Bot):
                 side='home' if fair_prob_home >= 0.5 else 'away',
                 fair_prob=max(fair_prob_home, 1 - fair_prob_home),
                 line=None,
-                note=f'Projected {home} {home_pts:.1f} - {away} {away_pts:.1f}.',
+                note=f'Projected {home} {home_pts:.1f} - {away} {away_pts:.1f}.{injury_note}',
             )
 
             # ── spread ──
@@ -186,7 +233,7 @@ class TheAccountant(Bot):
                     picks, ctx, game_id, market='spread', side=side,
                     fair_prob=max(fair_prob_home_covers, 1 - fair_prob_home_covers),
                     line=home_spread if side == 'home' else -home_spread,
-                    note=f'Projected margin {projected_margin:+.1f} vs market {home} {home_spread:+.1f}.',
+                    note=f'Projected margin {projected_margin:+.1f} vs market {home} {home_spread:+.1f}.{injury_note}',
                 )
 
             # ── total ──
@@ -199,7 +246,7 @@ class TheAccountant(Bot):
                     picks, ctx, game_id, market='total', side=side,
                     fair_prob=max(fair_prob_over, 1 - fair_prob_over),
                     line=total_line,
-                    note=f'Projected total {projected_total:.1f} vs market {total_line:.1f}.',
+                    note=f'Projected total {projected_total:.1f} vs market {total_line:.1f}.{injury_note}',
                 )
 
         return picks
