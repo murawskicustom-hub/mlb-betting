@@ -38,10 +38,29 @@ standard deviation around 13.5 points, and a logistic distribution with scale
 s approximates a normal with stdev sigma when s = pi / (sigma * sqrt(3)) — that
 works out to s ~= 0.134 for sigma=13.5, which is what's used below.
 TOTAL_TO_LOGIT_SCALE has no equivalent public anchor and is a plainer guess.
-None of this is fit against OUR results yet — there's no graded history to
-calibrate against. Revisit all of it once a real season's worth of graded
-picks exists to check the model's actual calibration (are its 65%-confidence
-picks really winning ~65% of the time?).
+
+Confidence ramp (added after Week 1, 2026): Week 1's real graded results
+(40 picks, -54u) showed real overconfidence, concentrated exactly where
+expected — off_epa/def_epa are 100% prior-season priors in Week 1 (zero
+current-season sample), so MARGIN_TO_LOGIT_SCALE's "mature model" grounding
+doesn't apply yet; the model was as confident on pure last-year priors as it
+should only be once it has real current-season evidence. 5-unit picks alone
+were 19 of 40 picks (nearly half) at a 37% win rate — worse than the 1-unit
+tier's 44%, and a real calibration failure, not just Week 1 randomness (with
+appropriate caveats for n=40 being a small, noisy sample).
+
+Rather than permanently lowering MARGIN_TO_LOGIT_SCALE/TOTAL_TO_LOGIT_SCALE
+(which would under-use real signal once the model actually has current-season
+data), CONFIDENCE_RAMP_GAMES scales the logit itself down when the matchup is
+still leaning heavily on prior-season data: a dampening factor from 0.5x (0
+current-season games played by either team) up to 1.0x (CONFIDENCE_RAMP_GAMES
+games in) is applied to the logit right before each sigmoid call. This targets
+the actual demonstrated problem (thin current-season data -> overconfidence)
+without touching the underlying point projections shown in each pick's
+reasoning, and restores full confidence once there's real signal to be
+confident about. Still a starting number, not fit precisely — there's not
+enough graded history yet to fit it rigorously either. Revisit both this and
+the base scales once several more weeks of graded results exist.
 
 Dual-axis note: bots/config.py's tier_for() expects an edge_pct that's
 independent of fair_prob (normally "model probability vs market-implied
@@ -72,6 +91,16 @@ HOME_FIELD_POINTS = 1.5         # rough modern-NFL home-field scoring edge
 MARGIN_TO_LOGIT_SCALE = 0.134   # pi / (13.5 * sqrt(3)) — see module docstring
 TOTAL_TO_LOGIT_SCALE = 0.12     # scales a projected total-points diff into a logit
 
+# Confidence ramp: 0.5x at 0 current-season games played (by the LESS-sampled
+# side of the matchup), ramping linearly to 1.0x by CONFIDENCE_RAMP_GAMES.
+CONFIDENCE_RAMP_GAMES = 4
+CONFIDENCE_FLOOR = 0.5
+
+
+def _confidence_factor(games_played: float) -> float:
+    ramp = min(max(games_played, 0.0) / CONFIDENCE_RAMP_GAMES, 1.0)
+    return CONFIDENCE_FLOOR + (1.0 - CONFIDENCE_FLOOR) * ramp
+
 
 def _team_epa(features: dict, team: str) -> tuple[float, float] | None:
     """(off_epa, def_epa) for this team, or None if either is missing."""
@@ -80,6 +109,11 @@ def _team_epa(features: dict, team: str) -> tuple[float, float] | None:
     if off_epa is None or def_epa is None:
         return None
     return float(off_epa), float(def_epa)
+
+
+def _games_played(features: dict, team: str) -> float:
+    val = features.get(f'tendency:{team}:games_played')
+    return float(val) if val is not None else 0.0
 
 
 def _projected_points(home_off: float, home_def: float, away_off: float, away_def: float) -> tuple[float, float]:
@@ -126,8 +160,14 @@ class TheAccountant(Bot):
             projected_margin = home_pts - away_pts
             projected_total = home_pts + away_pts
 
+            # Dampen confidence, not the point projections themselves, by how
+            # little current-season data either side of this matchup has —
+            # the weaker-sampled team sets the pace (min, not average).
+            games_played = min(_games_played(features, home), _games_played(features, away))
+            confidence = _confidence_factor(games_played)
+
             # ── moneyline ──
-            fair_prob_home = _sigmoid(MARGIN_TO_LOGIT_SCALE * projected_margin)
+            fair_prob_home = _sigmoid(MARGIN_TO_LOGIT_SCALE * projected_margin * confidence)
             self._maybe_pick(
                 picks, ctx, game_id, market='moneyline',
                 side='home' if fair_prob_home >= 0.5 else 'away',
@@ -140,7 +180,7 @@ class TheAccountant(Bot):
             home_spread = consensus_line(ctx, game_id, 'spread', 'home')
             if home_spread is not None:
                 home_cover_margin = projected_margin + home_spread
-                fair_prob_home_covers = _sigmoid(MARGIN_TO_LOGIT_SCALE * home_cover_margin)
+                fair_prob_home_covers = _sigmoid(MARGIN_TO_LOGIT_SCALE * home_cover_margin * confidence)
                 side = 'home' if fair_prob_home_covers >= 0.5 else 'away'
                 self._maybe_pick(
                     picks, ctx, game_id, market='spread', side=side,
@@ -153,7 +193,7 @@ class TheAccountant(Bot):
             total_line = consensus_line(ctx, game_id, 'total', 'over')
             if total_line is not None:
                 total_diff = projected_total - total_line
-                fair_prob_over = _sigmoid(TOTAL_TO_LOGIT_SCALE * total_diff)
+                fair_prob_over = _sigmoid(TOTAL_TO_LOGIT_SCALE * total_diff * confidence)
                 side = 'over' if fair_prob_over >= 0.5 else 'under'
                 self._maybe_pick(
                     picks, ctx, game_id, market='total', side=side,

@@ -43,6 +43,12 @@ until nflverse has processed real games, so a 404 before Week 1 is expected
 and handled via the pulls audit log rather than crashing — for the CURRENT
 season that just means "no current-season sample yet," not a failure; the
 prior-season fetch still proceeds and the blend falls back to 100% prior.
+
+Also writes tendency:{team}:games_played — the raw (unblended) count of
+CURRENT-season games this team has played. This isn't a tendency stat
+itself; it exists so a bot can tell how much of its read on a team is real
+current-season signal vs. a leftover prior-season prior, and dampen its own
+confidence accordingly (see bots/the_accountant.py's CONFIDENCE_RAMP_GAMES).
 """
 
 import sys
@@ -153,7 +159,9 @@ def blend_with_prior(current: pd.DataFrame, prior: pd.DataFrame) -> pd.DataFrame
         games = row.get('games_played_cur')
         games = 0.0 if pd.isna(games) else games
         weight_cur = min(games / BLEND_GAMES, 1.0)
-        out = {'team': team}
+        # Unblended — a bot needs the raw current-season count itself (not a
+        # blended value) to know how much to trust this team's other numbers.
+        out = {'team': team, 'games_played': games}
         for col in TENDENCY_COLS:
             cur_val = row.get(f'{col}_cur')
             prior_val = row.get(f'{col}_prior')
@@ -213,7 +221,7 @@ def pull_tendencies(season: int, week: int) -> dict:
             if game_id is None:
                 continue  # team not playing this week — still fine, just nothing to attach it to
             teams_matched += 1
-            for col in TENDENCY_COLS:
+            for col in (*TENDENCY_COLS, 'games_played'):
                 val = row[col]
                 if val is None or pd.isna(val):
                     continue
