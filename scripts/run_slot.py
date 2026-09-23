@@ -44,6 +44,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from database import get_connection, upsert_sql
 from grader import grade_pending
 from clv_calculator import compute_clv
+from calibration import compute_report as compute_calibration_report
 
 # Import every bot module for its registration side effect.
 import bots.coach_bo    # noqa: F401
@@ -53,7 +54,7 @@ from bots import registry
 from bots.base import BotContext
 from bots.config import BOT_CONFIG_VERSION
 
-from notify import send_slot_digest
+from notify import send_slot_digest, send_calibration_report
 
 SPORT = 'nfl'
 VALID_SLOTS = ('tuesday_research', 'thursday_lock', 'sunday_lock', 'monday_lock', 'tuesday_grade')
@@ -395,6 +396,17 @@ def run_tuesday_grade(conn, log: logging.Logger) -> dict:
         f'  CLV: recs filled={clv_summary["rec_filled"]} skipped={clv_summary["rec_skipped"]}, '
         f'bets filled={clv_summary["bet_filled"]} skipped={clv_summary["bet_skipped"]}'
     )
+
+    # Weekly calibration/health report — per-bot tier calibration (is a
+    # bigger unit size actually winning more?) and silence detection (did a
+    # bot fail to decide on any already-started game this week?). This is
+    # what would have caught Week 2's stuck-counter bug within a week instead
+    # of two, since every bot going silent on a real game is itself a signal.
+    try:
+        calibration_report = compute_calibration_report(conn, SPORT)
+        send_calibration_report(calibration_report)
+    except Exception as e:
+        log.warning(f'  calibration report failed: {e}')
 
     # Only advance once this week's games have actually all kicked off —
     # never just because the weekly cron happened to fire (see _week_is_over).

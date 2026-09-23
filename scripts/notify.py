@@ -173,6 +173,58 @@ def send_slot_digest(slot_name: str, picks_by_bot: dict, fades_by_bot: dict, gam
             log.info(f'{bot_key} digest sent: {len(picks)} pick(s), {n_fades} fade(s), slot={slot_name}')
 
 
+def send_calibration_report(report: dict) -> bool:
+    """Post the weekly calibration/health report (scripts/calibration.py) to
+    Discord. Posted into Coach Bo's channel — clearly labeled as a system
+    report, not one of his own picks — since this covers all three bots and
+    there's no dedicated system channel. Silent by design if the webhook
+    isn't configured, same as every other notify function here.
+    """
+    webhook = BOT_WEBHOOKS.get('coach_bo', '')
+    if not webhook:
+        log.warning('no webhook configured for coach_bo — skipping calibration report')
+        return False
+
+    lines = [f"**⚙️ SYSTEM REPORT — Week {report['week']} Calibration Check**", '']
+
+    any_silent = False
+    for bot_key, b in report['bots'].items():
+        display = b['display_name']
+        if b['total_graded'] == 0:
+            lines.append(f'**{display}**: no graded picks yet this season.')
+        else:
+            tier_str = ' | '.join(
+                f"{t['units']:.0f}u (n={t['n']}, {t['win_rate']:.0%})" for t in b['by_tier']
+            )
+            lines.append(
+                f"**{display}**: {b['total_graded']} graded, {b['win_rate']:.1%} win rate, "
+                f"{b['total_units']:+.2f}u"
+            )
+            lines.append(f'  By tier: {tier_str}')
+            if b['inverted']:
+                lines.append('  ⚠️ Tier inversion — a bigger unit size is winning less often than a smaller one.')
+
+        if b['silent_games']:
+            any_silent = True
+            games_str = ', '.join(f"{g['away_team']}@{g['home_team']}" for g in b['silent_games'][:5])
+            more = len(b['silent_games']) - 5
+            more_str = f' (+{more} more)' if more > 0 else ''
+            lines.append(f"  🚨 SILENT on {len(b['silent_games'])} already-started game(s): {games_str}{more_str}")
+        lines.append('')
+
+    if not any_silent:
+        lines.append('✅ No silent bots this week.')
+
+    content = '\n'.join(lines).strip()
+    if len(content) > 1990:
+        content = content[:1987] + '...'
+
+    ok = _post(webhook, {'content': content})
+    if ok:
+        log.info(f"calibration report sent for week {report['week']}")
+    return ok
+
+
 def send_test_messages() -> dict:
     """Send [TEST] messages to every configured bot webhook. Returns {bot_key: ok}."""
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
