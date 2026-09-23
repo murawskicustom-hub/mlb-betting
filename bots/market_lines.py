@@ -26,16 +26,18 @@ def consensus_line(ctx, game_id: str, market: str, outcome_type: str) -> float |
     return statistics.median(lines)
 
 
-def opening_and_current(ctx, game_id: str, market: str, outcome_type: str, field: str) -> tuple[float, float] | None:
-    """(opening_value, current_value) for `field` ('line' or 'price_american'),
-    each the median across books at that snapshot time. A single pull_odds_*
-    run writes every row with the same snapshot_time_utc, so grouping by
-    distinct snapshot_time_utc values naturally separates "this run's pull"
-    from "an earlier run's pull" without needing to track pull identity
-    separately. Returns None if fewer than two distinct snapshot times exist
-    yet for this outcome — there's no real movement to measure from a single
-    pull, and reporting a fake zero-movement reading would be dishonest, not
-    just uninteresting.
+def opening_and_current(ctx, game_id: str, market: str, outcome_type: str, field: str):
+    """(opening_value, current_value, opening_time_utc, current_time_utc) for
+    `field` ('line' or 'price_american'), each the median across books at
+    that snapshot time. A single pull_odds_* run writes every row with the
+    same snapshot_time_utc, so grouping by distinct snapshot_time_utc values
+    naturally separates "this run's pull" from "an earlier run's pull"
+    without needing to track pull identity separately. The timestamps are
+    returned alongside the values so a bot can say how long the move has
+    been building, not just its size. Returns None if fewer than two
+    distinct snapshot times exist yet for this outcome — there's no real
+    movement to measure from a single pull, and reporting a fake
+    zero-movement reading would be dishonest, not just uninteresting.
     """
     rows = [
         row for row in ctx.odds.get(game_id, [])
@@ -50,4 +52,4 @@ def opening_and_current(ctx, game_id: str, market: str, outcome_type: str, field
     opening_time, current_time = times[0], times[-1]
     opening_vals = [row[field] for row in rows if row['snapshot_time_utc'] == opening_time]
     current_vals = [row[field] for row in rows if row['snapshot_time_utc'] == current_time]
-    return statistics.median(opening_vals), statistics.median(current_vals)
+    return statistics.median(opening_vals), statistics.median(current_vals), opening_time, current_time

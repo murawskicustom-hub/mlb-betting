@@ -39,7 +39,20 @@ candidates, not something to fake with weaker data now.
 Dual-axis note: this bot is NOT in bots/config.py's BOT_TIERS, same
 departure bots/coach_bo.py documents — sizing here is driven by movement
 magnitude, not an edge_pct/fair_prob pair, so tier_for() doesn't fit.
+
+Notes enrichment: the reasoning used to be just the bare movement fact
+("line moved X -> Y — following the steam"), which is honest but thin.
+Two things get added now, both still within what Darren actually has
+grounded data for — no fabricated "why": (1) how long the move has been
+building, from the real snapshot timestamps, since a shift over 3 days
+reads differently than one in the last hour; (2) either team's real
+injury-report names for the week, if any, stated as context alongside
+the move — NOT as a claimed cause. Darren doesn't know why a line moved,
+only that it did; an injury mention is "here's what else is true about
+this game," not "this is why."
 """
+
+from datetime import datetime, timezone
 
 from .base import Bot, Pick, BotContext
 from . import registry
@@ -69,6 +82,46 @@ def _tier_for_magnitude(magnitude: float, tiers: list[tuple[int, float]]) -> int
     return best
 
 
+def _parse_snapshot_time(ts: str):
+    for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%MZ'):
+        try:
+            return datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _format_timespan(opening_time: str, current_time: str) -> str:
+    """Human-readable elapsed time between two snapshot timestamps."""
+    t0, t1 = _parse_snapshot_time(opening_time), _parse_snapshot_time(current_time)
+    if t0 is None or t1 is None:
+        return 'since the market opened'
+    hours = (t1 - t0).total_seconds() / 3600
+    if hours < 1:
+        return 'in the last few minutes'
+    if hours < 36:
+        return f'over the last {hours:.0f}h'
+    return f'over the last {hours / 24:.1f} days'
+
+
+MAX_INJURY_NAMES = 4
+
+
+def _injury_note(features: dict, team: str) -> str | None:
+    """Real injury-report names for this team this week, if any — stated as
+    context alongside the movement, never as a claimed cause of it. Capped
+    so a genuinely bad-luck-with-injuries week doesn't turn one line of
+    reasoning into a wall of names."""
+    prefix = f'injury:{team}:'
+    names = sorted({key[len(prefix):] for key in features if key.startswith(prefix)})
+    if not names:
+        return None
+    shown = names[:MAX_INJURY_NAMES]
+    more = len(names) - len(shown)
+    suffix = f' (+{more} more)' if more > 0 else ''
+    return f'{team} injury report: {", ".join(shown)}{suffix}'
+
+
 class DegenDarren(Bot):
     key = 'degen_darren'
     display_name = 'Degen Darren'
@@ -80,46 +133,54 @@ class DegenDarren(Bot):
         for game in ctx.games:
             game_id = game['game_id']
             home, away = game['home_team'], game['away_team']
+            features = ctx.features.get(game_id, {})
+
+            injury_notes = [n for n in (_injury_note(features, home), _injury_note(features, away)) if n]
+            injury_suffix = (' ' + ' | '.join(injury_notes) + '.') if injury_notes else ''
 
             # ── spread: line moving more negative for home = steam toward home ──
             spread_move = opening_and_current(ctx, game_id, 'spread', 'home', 'line')
             if spread_move is not None:
-                opening, current = spread_move
+                opening, current, open_t, cur_t = spread_move
                 delta = current - opening
                 magnitude = abs(delta)
                 tier = _tier_for_magnitude(magnitude, POINT_MOVE_TIERS)
                 if tier is not None and delta != 0:
                     side = 'home' if delta < 0 else 'away'
+                    timespan = _format_timespan(open_t, cur_t)
                     picks.append(Pick(
                         sport=ctx.sport, game_id=game_id, market='spread', side=side,
                         line=current if side == 'home' else -current,
                         fair_price_american=None, edge_pct=None,
                         confidence=f'{tier}u', units=float(tier), is_shadow=True,
                         notes=(f'{home} spread moved {opening:+g} -> {current:+g} '
-                               f'({magnitude:.1f} pt toward {home if side == "home" else away}) — following the steam.'),
+                               f'({magnitude:.1f} pt toward {home if side == "home" else away}) '
+                               f'{timespan} — following the steam.{injury_suffix}'),
                     ))
 
             # ── total: line moving up = steam toward the over ──
             total_move = opening_and_current(ctx, game_id, 'total', 'over', 'line')
             if total_move is not None:
-                opening, current = total_move
+                opening, current, open_t, cur_t = total_move
                 delta = current - opening
                 magnitude = abs(delta)
                 tier = _tier_for_magnitude(magnitude, POINT_MOVE_TIERS)
                 if tier is not None and delta != 0:
                     side = 'over' if delta > 0 else 'under'
+                    timespan = _format_timespan(open_t, cur_t)
                     picks.append(Pick(
                         sport=ctx.sport, game_id=game_id, market='total', side=side,
                         line=current, fair_price_american=None, edge_pct=None,
                         confidence=f'{tier}u', units=float(tier), is_shadow=True,
                         notes=(f'Total moved {opening:g} -> {current:g} '
-                               f'({magnitude:.1f} pt toward the {side}) — following the steam.'),
+                               f'({magnitude:.1f} pt toward the {side}) '
+                               f'{timespan} — following the steam.{injury_suffix}'),
                     ))
 
             # ── moneyline: price moving toward home (higher implied prob) = steam toward home ──
             price_move = opening_and_current(ctx, game_id, 'moneyline', 'home', 'price_american')
             if price_move is not None:
-                opening_price, current_price = price_move
+                opening_price, current_price, open_t, cur_t = price_move
                 opening_prob = _implied_prob(opening_price)
                 current_prob = _implied_prob(current_price)
                 delta = current_prob - opening_prob
@@ -127,12 +188,14 @@ class DegenDarren(Bot):
                 tier = _tier_for_magnitude(magnitude, PROB_MOVE_TIERS)
                 if tier is not None and delta != 0:
                     side = 'home' if delta > 0 else 'away'
+                    timespan = _format_timespan(open_t, cur_t)
                     picks.append(Pick(
                         sport=ctx.sport, game_id=game_id, market='moneyline', side=side,
                         line=None, fair_price_american=None, edge_pct=None,
                         confidence=f'{tier}u', units=float(tier), is_shadow=True,
                         notes=(f'{home} ML moved {opening_price:+g} ({opening_prob:.0%}) -> '
-                               f'{current_price:+g} ({current_prob:.0%}) — following the steam.'),
+                               f'{current_price:+g} ({current_prob:.0%}) '
+                               f'{timespan} — following the steam.{injury_suffix}'),
                     ))
 
         return picks

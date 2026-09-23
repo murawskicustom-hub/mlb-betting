@@ -16,6 +16,19 @@ given week: key = 'injury:{TEAM}:{athlete_name}', value_text = "{status} -
 {short_comment}". ESPN's per-athlete injury log includes routine "Active"
 entries (roster moves, not real designations) — those are filtered out;
 only real designations (Questionable/Doubtful/Out/IR/etc.) are kept.
+
+Delete-then-insert, not upsert: the features table's unique index is
+(game_id, as_of_date, key) — deliberately date-inclusive so most feature
+types (tendency/EPA stats) keep a real history. Injuries are different: the
+key already encodes the player's name, and there's no "this player
+recovered" signal, only a fresh list of who's CURRENTLY hurt. Upserting on
+that index meant every day's pull was a new row rather than a replacement,
+so a player's preseason-camp injury note from a month ago would still show
+up in a bot's prompt today even though they've long since returned — this
+was silently bloating Coach Bo's grounded facts (and Degen Darren's notes)
+with stale, resolved injuries. Each pull now deletes all existing
+'injury:{team}:%' rows for that team's current game_id before writing the
+fresh list, so only what ESPN reports as current ever survives.
 """
 
 import sys
@@ -139,6 +152,17 @@ def pull_injuries(season: int, week: int, teams: list[str] | None = None) -> dic
                 continue
 
             injuries = fetch_team_injuries(team_id, season)
+
+            # Clear this team's existing injury rows for this game before
+            # writing the fresh list — see module docstring on why an upsert
+            # alone isn't enough (no "recovered" signal, and as_of_date is
+            # part of the unique index so a plain upsert would never collide
+            # with yesterday's rows anyway).
+            conn.execute(
+                "DELETE FROM features WHERE game_id = ? AND key LIKE ?",
+                (game_id, f'injury:{team}:%'),
+            )
+
             for inj in injuries:
                 conn.execute(
                     upsert_sql('features',
